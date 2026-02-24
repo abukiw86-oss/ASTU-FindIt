@@ -21,7 +21,6 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _errorMessage;
 
   Future<void> _login() async {
-    // Clear previous error when user tries again
     setState(() => _errorMessage = null);
 
     if (!_formKey.currentState!.validate()) return;
@@ -35,12 +34,6 @@ class _LoginScreenState extends State<LoginScreen> {
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
-      print('Full login response:');
-print(result);
-print('User object inside: ${result['user']}');
-
-      print('Login API response: $result'); // ← keep this for debugging
-
       if (result['success'] == true) {
         final user = result['user'] as Map<String, dynamic>?;
 
@@ -76,12 +69,10 @@ print('User object inside: ${result['user']}');
         );
       } else {
         setState(() {
-          // Show real error message from server (error or message key)
           _errorMessage = result['error'] ?? result['message'] ?? 'Login failed. Please try again.';
         });
       }
     } catch (e) {
-      print(e);
       setState(() {
         _errorMessage = 'Something went wrong: ${e.toString()}';
       });

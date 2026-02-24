@@ -34,7 +34,6 @@ class ApiService {
       };
     }
   }
-
 static Future<Map<String, dynamic>> login({
   required String email,
   required String password,
@@ -50,7 +49,6 @@ static Future<Map<String, dynamic>> login({
 
   final data = jsonDecode(response.body);
 
-  // Improved handling
   if (response.statusCode == 200 && data['message'] == 'Logged in successfully') {
     return {
       'success': true,
@@ -67,7 +65,6 @@ static Future<Map<String, dynamic>> login({
 }
 
 static Future<Map<String, dynamic>> getItems({required String type}) async {
-    // type = "lost" or "found"
     final response = await http.get(
       Uri.parse('$baseUrl?action=list-items&type=$type'),
       headers: {'Content-Type': 'application/json'},
@@ -96,51 +93,35 @@ static Future<Map<String, dynamic>> reportItem({
   File? imageFile,
   required String reporterName,
   required String reporterPhone,
+  required int? userId, 
 }) async {
   try {
-    print('=' * 50);
-    print('📤 API SERVICE - Preparing request');
-    print('=' * 50);
-    
-    // FIX: Ensure type is not empty and is valid
     String finalType = type.trim().toLowerCase();
     if (finalType.isEmpty) {
-      print('⚠️ CRITICAL: type is empty in ApiService! Setting to default "lost"');
       finalType = 'lost';
     }
     
     if (finalType != 'lost' && finalType != 'found') {
-      print('⚠️ CRITICAL: invalid type "$finalType" in ApiService! Setting to default "lost"');
       finalType = 'lost';
     }
-    
-    print('📤 Final type being sent: "$finalType"');
-    print('📤 Title: "$title"');
-    print('📤 Reporter: "$reporterName"');
-    print('📤 Phone: "$reporterPhone"');
     
     var request = http.MultipartRequest(
       'POST',
       Uri.parse('$baseUrl?action=report-item'),
     );
 
-    // FIX: Add fields one by one with explicit values
-    request.fields['type'] = finalType;  // Use the validated type
+    request.fields['type'] = finalType; 
     request.fields['title'] = title;
     request.fields['description'] = description;
     request.fields['location'] = location ?? '';
     request.fields['category'] = category ?? 'other';
     request.fields['reporter_name'] = reporterName;
     request.fields['reporter_phone'] = reporterPhone;
-
-    // Debug: Print all fields being sent
-    print('📤 Request fields:');
-    request.fields.forEach((key, value) {
-      print('   $key: "$value"');
-    });
+     if (userId != null) {
+      request.fields['user_id'] = userId.toString();
+    }
 
     if (imageFile != null) {
-      print('📸 Adding image: ${imageFile.path}');
       
       if (await imageFile.exists()) {
         var stream = http.ByteStream(imageFile.openRead());
@@ -153,14 +134,9 @@ static Future<Map<String, dynamic>> reportItem({
           filename: imageFile.path.split('/').last,
         );
         request.files.add(multipartFile);
-        print('📸 Image added, size: $length bytes');
-      } else {
-        print('⚠️ Image file does not exist');
       }
     }
 
-    // Send request with timeout
-    print('⏳ Sending request to ${request.url}...');
     var streamedResponse = await request.send().timeout(
       const Duration(seconds: 30),
       onTimeout: () {
@@ -170,15 +146,10 @@ static Future<Map<String, dynamic>> reportItem({
     
     var response = await http.Response.fromStream(streamedResponse);
     
-    print('📥 Response status: ${response.statusCode}');
-    print('📥 Response body: ${response.body}');
-
-    // Parse response
     Map<String, dynamic> data;
     try {
       data = jsonDecode(response.body);
     } catch (e) {
-      print('❌ Failed to parse response: $e');
       return {
         'success': false,
         'message': 'Invalid server response',
@@ -199,13 +170,162 @@ static Future<Map<String, dynamic>> reportItem({
       };
     }
   } catch (e) {
-    print('❌ Exception in reportItem: $e');
     return {
       'success': false,
       'message': 'Network error: ${e.toString()}',
     };
   }
 }
+static Future<Map<String, dynamic>> getLostItems() async {
+  try {
+    final response = await http.get(
+      Uri.parse('$baseUrl?action=get-lost-items'),
+    );
+    final data = jsonDecode(response.body);
+    return data;
+  } catch (e) {
+    return {'success': false, 'message': 'Network error'};
+  }
+}
 
+
+static Future<Map<String, dynamic>> requestItem({
+  required int userId,
+  required int itemId,
+  required String message,
+  required String proof,
+}) async {
+  try {
+    final response = await http.post(
+      Uri.parse('$baseUrl?action=request-item'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'user_id': userId,
+        'item_id': itemId,
+        'message': message,
+        'proof_description': proof,
+      }),
+    );
+    return jsonDecode(response.body);
+  } catch (e) {
+    return {'success': false, 'message': 'Network error'};
+  }
+}
+static Future<Map<String, dynamic>> reportFoundMatch({
+  required int lostItemId,
+  required String finderName,
+  required String finderPhone,
+  required String finderMessage,
+  int? userId,
+}) async {
+  try {
+    final response = await http.post(
+      Uri.parse('$baseUrl?action=report-found-match'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: jsonEncode({
+        'lost_item_id': lostItemId,
+        'finder_name': finderName,
+        'finder_phone': finderPhone,
+        'finder_message': finderMessage,
+        'user_id': userId,
+      }),
+    ).timeout(
+      const Duration(seconds: 30),
+      onTimeout: () {
+        throw Exception('Connection timeout');
+      },
+    );
+    
+    if (response.body.trim().isEmpty) {
+      return {'success': false, 'message': 'Empty response from server'};
+    }
+    if (response.body.trim().startsWith('<')) {
+      return {
+        'success': false, 
+        'message': 'Server error. Please check server logs.'
+      };
+    }
+    
+    final Map<String, dynamic> data = jsonDecode(response.body);
+    return data;
+    
+  } catch (e) {
+    return {
+      'success': false, 
+      'message': 'Network error: ${e.toString()}'
+    };
+  }
+}
+
+static Future<Map<String, dynamic>> requestItemAccess({
+  required int userId,
+  required int itemId,
+  required String message,
+}) async {
+  try {
+    
+    final response = await http.post(
+      Uri.parse('$baseUrl?action=request-item-access'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: jsonEncode({
+        'user_id': userId,
+        'item_id': itemId,
+        'message': message,
+      }),
+    ).timeout(
+      const Duration(seconds: 30),
+      onTimeout: () {
+        throw Exception('Connection timeout');
+      },
+    );
+    
+    if (response.body.trim().isEmpty) {
+      return {'success': false, 'message': 'Empty response from server'};
+    }
+    
+    if (response.body.trim().startsWith('<')) {
+      return {
+        'success': false, 
+        'message': 'Server error. Please check server logs.'
+      };
+    }
+    
+    final Map<String, dynamic> data = jsonDecode(response.body);
+    return data;
+    
+  } catch (e) {
+    return {
+      'success': false, 
+      'message': 'Network error: ${e.toString()}'
+    };
+  }
+}
+static Future<Map<String, dynamic>> getFoundItems({int? userId}) async {
+  try {
+    final response = await http.get(
+      Uri.parse('$baseUrl?action=get-found-items${userId != null ? '&user_id=$userId' : ''}'),
+    );
+    return jsonDecode(response.body);
+  } catch (e) {
+    return {'success': false, 'message': 'Network error: $e'};
+  }
+
+}
+static Future<Map<String, dynamic>> getUserRequests({required int userId}) async {
+  try {
+    final response = await http.get(
+      Uri.parse('$baseUrl?action=get-user-requests&user_id=$userId'),
+    );
+    return jsonDecode(response.body);
+  } catch (e) {
+    return {'success': false, 'message': 'Network error: $e'};
+  }
+}
 
 }

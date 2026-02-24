@@ -4,8 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class AuthService {
   static const String _keyUser = 'user_data';
   static const String _keyIsLoggedIn = 'is_logged_in';
-
-  /// Save complete user data after login or registration
+  
   static Future<void> saveUser({
     required dynamic id,
     required String email,
@@ -27,7 +26,6 @@ class AuthService {
     await prefs.setBool(_keyIsLoggedIn, true);
   }
 
-  /// Get saved user data (returns null if not logged in)
   static Future<Map<String, dynamic>?> getUser() async {
     final prefs = await SharedPreferences.getInstance();
     final userJson = prefs.getString(_keyUser);

@@ -14,12 +14,12 @@ class ReportItemScreen extends StatefulWidget {
 class _ReportItemScreenState extends State<ReportItemScreen> {
   final _formKey = GlobalKey<FormState>();
 
-  String _selectedType = 'lost'; // default value – always 'lost' or 'found'
+  String _selectedType = 'lost';
+  String _selectedCategory = 'electronics'; // Default category
 
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _locationController = TextEditingController();
-  final _categoryController = TextEditingController();
 
   File? _selectedImage;
   final ImagePicker _picker = ImagePicker();
@@ -31,19 +31,34 @@ class _ReportItemScreenState extends State<ReportItemScreen> {
   String? _reporterName;
   String? _reporterPhone;
 
+  // Predefined categories list
+  final List<Map<String, dynamic>> _categories = [
+    {'value': 'electronics', 'label': '📱 Electronics', 'icon': Icons.phone_android},
+    {'value': 'clothing', 'label': '👕 Clothing', 'icon': Icons.checkroom},
+    {'value': 'accessories', 'label': '⌚ Accessories', 'icon': Icons.watch},
+    {'value': 'books', 'label': '📚 Books', 'icon': Icons.menu_book},
+    {'value': 'documents', 'label': '📄 Documents', 'icon': Icons.description},
+    {'value': 'keys', 'label': '🔑 Keys', 'icon': Icons.vpn_key},
+    {'value': 'bags', 'label': '🎒 Bags', 'icon': Icons.backpack},
+    {'value': 'wallets', 'label': '👛 Wallets', 'icon': Icons.account_balance_wallet},
+    {'value': 'phones', 'label': '📱 Phones', 'icon': Icons.phone_iphone},
+    {'value': 'laptops', 'label': '💻 Laptops', 'icon': Icons.laptop},
+    {'value': 'id_cards', 'label': '🪪 ID Cards', 'icon': Icons.credit_card},
+    {'value': 'jewelry', 'label': '💍 Jewelry', 'icon': Icons.diamond},
+    {'value': 'toys', 'label': '🧸 Toys', 'icon': Icons.toys},
+    {'value': 'sports', 'label': '⚽ Sports Equipment', 'icon': Icons.sports_soccer},
+    {'value': 'other', 'label': '📦 Other', 'icon': Icons.category},
+  ];
+
   @override
   void initState() {
     super.initState();
     _loadUserData();
-    // Debug: print initial selected type
-    print('🔍 INITIAL selected type: $_selectedType');
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Debug: print when dependencies change
-    print('🔍 DID CHANGE selected type: $_selectedType');
   }
 
   Future<void> _loadUserData() async {
@@ -54,9 +69,7 @@ class _ReportItemScreenState extends State<ReportItemScreen> {
           _reporterName = user['full_name'] as String?;
           _reporterPhone = user['phone'] as String?;
         });
-        print('✅ User data loaded: $_reporterName / $_reporterPhone');
       } else {
-        print('⚠️ No user data found');
         if (mounted) {
           setState(() {
             _errorMessage = 'Please login to report items';
@@ -64,7 +77,7 @@ class _ReportItemScreenState extends State<ReportItemScreen> {
         }
       }
     } catch (e) {
-      print('❌ Error loading user data: $e');
+      // 
     }
   }
 
@@ -81,9 +94,6 @@ class _ReportItemScreenState extends State<ReportItemScreen> {
         final file = File(pickedFile.path);
         final fileSize = await file.length();
         final fileSizeMB = fileSize / (1024 * 1024);
-        
-        print('📸 Selected image: ${pickedFile.name}');
-        print('📊 Image size: ${fileSizeMB.toStringAsFixed(2)} MB');
 
         if (fileSize > 5 * 1024 * 1024) {
           if (mounted) {
@@ -106,7 +116,7 @@ class _ReportItemScreenState extends State<ReportItemScreen> {
         }
       }
     } catch (e) {
-      print('❌ Error picking image: $e');
+      // 
     }
   }
 
@@ -117,49 +127,30 @@ class _ReportItemScreenState extends State<ReportItemScreen> {
       });
     }
   }
+
 Future<void> _submit() async {
-  // Hide keyboard
   FocusScope.of(context).unfocus();
 
-  // Debug: Print current state before validation
-  print('=' * 50);
-  print('🔍 CURRENT STATE BEFORE SUBMISSION');
-  print('=' * 50);
-  print('_selectedType variable: "$_selectedType"');
-  print('_selectedType length: ${_selectedType.length}');
-  print('_selectedType runtimeType: ${_selectedType.runtimeType}');
-  print('_selectedType code units: ${_selectedType.runes.toList()}');
-  
-  // FIX: Ensure we have a valid type
   String typeToSend = _selectedType.trim().toLowerCase();
   
-  // Double-check if it's empty and set default if needed
   if (typeToSend.isEmpty) {
-    print('⚠️ CRITICAL: typeToSend is empty! Setting to default "lost"');
     typeToSend = 'lost';
-    // Also update the state to fix the UI
     setState(() {
       _selectedType = 'lost';
     });
   }
   
-  // Final validation
   if (typeToSend != 'lost' && typeToSend != 'found') {
-    print('❌ Invalid type detected: "$typeToSend" - forcing to "lost"');
     typeToSend = 'lost';
     setState(() {
       _selectedType = 'lost';
     });
   }
   
-  print('✅ FINAL type to send: "$typeToSend"');
-
-  // Validate form
   if (!_formKey.currentState!.validate()) {
     return;
   }
 
-  // Check reporter info
   if (_reporterName == null || _reporterName!.trim().isEmpty) {
     setState(() {
       _errorMessage = 'Your name is missing. Please login again.';
@@ -174,27 +165,22 @@ Future<void> _submit() async {
     return;
   }
 
+  if (typeToSend == 'found' && _selectedImage == null) {
+    setState(() {
+      _errorMessage = 'Photo is required for found items';
+    });
+    return;
+  }
+
   setState(() {
     _isLoading = true;
     _errorMessage = null;
     _successMessage = null;
   });
-
-  // Print all data being sent
-  print('=' * 50);
-  print('📤 SUBMITTING REPORT FROM PAGE');
-  print('=' * 50);
-  print('Type: "$typeToSend"');
-  print('Title: "${_titleController.text.trim()}"');
-  print('Description: "${_descriptionController.text.trim()}"');
-  print('Location: "${_locationController.text.trim()}"');
-  print('Category: "${_categoryController.text.trim()}"');
-  print('Reporter Name: "$_reporterName"');
-  print('Reporter Phone: "$_reporterPhone"');
-  print('Has Image: ${_selectedImage != null}');
-
+  
   try {
-    print('⏳ Calling ApiService.reportItem with type: "$typeToSend"');
+    final user = await AuthService.getUser();
+    int? userId = user?['id'];
     
     final result = await ApiService.reportItem(
       type: typeToSend,
@@ -203,15 +189,12 @@ Future<void> _submit() async {
       location: _locationController.text.trim().isEmpty 
           ? null 
           : _locationController.text.trim(),
-      category: _categoryController.text.trim().isEmpty 
-          ? 'other' 
-          : _categoryController.text.trim(),
+      category: _selectedCategory,
       imageFile: _selectedImage,
       reporterName: _reporterName!.trim(),
       reporterPhone: _reporterPhone!.trim(),
+      userId: userId, 
     );
-
-    print('📥 API Response in page: $result');
 
     if (mounted) {
       setState(() {
@@ -229,13 +212,12 @@ Future<void> _submit() async {
         _titleController.clear();
         _descriptionController.clear();
         _locationController.clear();
-        _categoryController.clear();
         setState(() {
           _selectedType = 'lost';
+          _selectedCategory = 'electronics';
           _selectedImage = null;
         });
 
-        // Clear success message after 3 seconds
         Future.delayed(const Duration(seconds: 3), () {
           if (mounted) {
             setState(() {
@@ -248,7 +230,6 @@ Future<void> _submit() async {
           _errorMessage = result['message'] ?? 'Failed to report item';
         });
         
-        // Show error in snackbar
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(_errorMessage!),
@@ -258,7 +239,7 @@ Future<void> _submit() async {
       }
     }
   } catch (e) {
-    print('❌ Exception during submission: $e');
+    // 
     if (mounted) {
       setState(() {
         _isLoading = false;
@@ -294,7 +275,6 @@ Future<void> _submit() async {
 
   @override
   Widget build(BuildContext context) {
-    // Show error screen if reporter info is missing
     if (_errorMessage != null && (_reporterName == null || _reporterPhone == null)) {
       return Scaffold(
         appBar: AppBar(
@@ -362,7 +342,6 @@ Future<void> _submit() async {
                   ),
                 ),
 
-                // Item Type Selection - FIXED SEGMENTED BUTTON
                 Text(
                   'Item Type *',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -371,64 +350,43 @@ Future<void> _submit() async {
                 ),
                 const SizedBox(height: 12),
 
-                // Debug: Show current selected type
-                Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.all(8),
-                  color: Colors.grey[200],
-                  child: Text(
-                    'Debug - Selected: "$_selectedType"',
-                    style: const TextStyle(fontSize: 12),
-                  ),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('Lost'),
+                      selected: _selectedType == 'lost',
+                      onSelected: (selected) {
+                        if (selected) {
+                          setState(() {
+                            _selectedType = 'lost';
+                          });
+                        }
+                      },
+                      selectedColor: Colors.red[100],
+                      labelStyle: TextStyle(
+                        color: _selectedType == 'lost' ? Colors.red[900] : Colors.black,
+                        fontWeight: _selectedType == 'lost' ? FontWeight.bold : FontWeight.normal,
+                      ),
+                    ),
+                    ChoiceChip(
+                      label: const Text('Found'),
+                      selected: _selectedType == 'found',
+                      onSelected: (selected) {
+                        if (selected) {
+                          setState(() {
+                            _selectedType = 'found';
+                          });
+                        }
+                      },
+                      selectedColor: Colors.green[100],
+                      labelStyle: TextStyle(
+                        color: _selectedType == 'found' ? Colors.green[900] : Colors.black,
+                        fontWeight: _selectedType == 'found' ? FontWeight.bold : FontWeight.normal,
+                      ),
+                    ),
+                  ],
                 ),
-
-               Wrap(
-          spacing: 8,
-          children: [
-            ChoiceChip(
-              label: const Text('Lost'),
-              selected: _selectedType == 'lost',
-              onSelected: (selected) {
-                if (selected) {
-                  print('🔘 Lost chip selected - setting type to "lost"');
-                  setState(() {
-                    _selectedType = 'lost';
-                  });
-                  // Force a rebuild and print the new value
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    print('✅ After setState, _selectedType = "$_selectedType"');
-                  });
-                }
-              },
-              selectedColor: Colors.red[100],
-              labelStyle: TextStyle(
-                color: _selectedType == 'lost' ? Colors.red[900] : Colors.black,
-                fontWeight: _selectedType == 'lost' ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
-            ChoiceChip(
-              label: const Text('Found'),
-              selected: _selectedType == 'found',
-              onSelected: (selected) {
-                if (selected) {
-                  print('🔘 Found chip selected - setting type to "found"');
-                  setState(() {
-                    _selectedType = 'found';
-                  });
-                  // Force a rebuild and print the new value
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    print('✅ After setState, _selectedType = "$_selectedType"');
-                  });
-                }
-              },
-              selectedColor: Colors.green[100],
-              labelStyle: TextStyle(
-                color: _selectedType == 'found' ? Colors.green[900] : Colors.black,
-                fontWeight: _selectedType == 'found' ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
-          ],
-        ),
 
                 const SizedBox(height: 24),
 
@@ -485,26 +443,61 @@ Future<void> _submit() async {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     prefixIcon: const Icon(Icons.location_on),
+                    hintText: 'e.g., Library, Cafeteria, Room 203',
                   ),
                 ),
                 const SizedBox(height: 16),
 
-                // Category Field
-                TextFormField(
-                  controller: _categoryController,
-                  decoration: InputDecoration(
-                    labelText: 'Category (optional)',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    prefixIcon: const Icon(Icons.category),
+                // Category Dropdown
+                Text(
+                  'Category *',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
+                const SizedBox(height: 8),
+
+                Container(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey[300]!),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: DropdownButtonFormField<String>(
+                    value: _selectedCategory,
+                    decoration: const InputDecoration(
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 16),
+                    ),
+                    icon: const Icon(Icons.arrow_drop_down),
+                    elevation: 16,
+                    style: const TextStyle(color: Colors.black, fontSize: 16),
+                    onChanged: (String? newValue) {
+                      setState(() {
+                        _selectedCategory = newValue!;
+                      });
+                    },
+                    items: _categories.map<DropdownMenuItem<String>>((Map<String, dynamic> category) {
+                      return DropdownMenuItem<String>(
+                        value: category['value'],
+                        child: Row(
+                          children: [
+                            Icon(category['icon'], size: 20, color: Colors.grey[700]),
+                            const SizedBox(width: 12),
+                            Text(category['label']),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+
                 const SizedBox(height: 24),
 
                 // Photo Section
-                Text(
-                  'Photo (optional)',
+             Text(
+                  _selectedType == 'lost' 
+                      ? 'Photo (optional)' 
+                      : 'Photo (required for found items)',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
@@ -557,7 +550,6 @@ Future<void> _submit() async {
 
                 const SizedBox(height: 24),
 
-                // Error/Success Messages
                 if (_errorMessage != null)
                   Container(
                     width: double.infinity,
@@ -639,7 +631,6 @@ Future<void> _submit() async {
     _titleController.dispose();
     _descriptionController.dispose();
     _locationController.dispose();
-    _categoryController.dispose();
     super.dispose();
   }
 }

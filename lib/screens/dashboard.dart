@@ -1,9 +1,13 @@
+import 'dart:async';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../services/notification_service.dart';
 import 'add_lost_found.dart';
 import '../services/auth_service.dart';
 import 'login.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'notification.dart';
+import 'profile.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -13,331 +17,276 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late TabController _tabController;
-  late PageController _featuredPageController;
+  
+  int _notificationCount = 0;
+  Timer? _notificationTimer;
 
-  List<Map<String, dynamic>> lostItems = [];
-  List<Map<String, dynamic>> foundItems = [];
-  List<Map<String, dynamic>> recentItems = [];
-  Set<int> pinnedItems = {};
-
+  List<dynamic> lostItems = [];
+  List<dynamic> foundItems = [];
+  
   bool isLoading = true;
   String? errorMessage;
-  int _currentFeaturedPage = 0;
   int? currentUserId;
+  String? currentUserName;
+  String? currentUserPhone;
+  
+  Set<int> requestedItems = {};
+  Set<int> approvedItems = {};
+  Map<int, String> requestStatus = {};
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _featuredPageController = PageController(viewportFraction: 0.85);
-    _initializeData();
-    
-    _featuredPageController.addListener(() {
-      setState(() {
-        _currentFeaturedPage = _featuredPageController.page?.round() ?? 0;
-      });
-    });
+    _loadUserData();
   }
 
-  Future<void> _initializeData() async {
-    await _loadUserData();
-    await _loadPinnedItems();
-    await _loadItems();
+  @override
+  void dispose() {
+    _notificationTimer?.cancel();
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadUserData() async {
-    try {
-      final user = await AuthService.getUser();
-      if (user != null && mounted) {
+    final user = await AuthService.getUser();
+    if (user != null && mounted) {
+      setState(() {
+        currentUserId = user['id'];
+        currentUserName = user['full_name'];
+        currentUserPhone = user['phone'];
+      });
+      
+      await Future.wait([
+        _loadRequestedItems(),
+        _loadNotificationCount(),
+      ]);
+      await _loadItems();
+      
+      _startNotificationTimer();
+    } else {
+      if (mounted) {
         setState(() {
-          // Safely convert id to int
-          currentUserId = _safeParseInt(user['id']);
+          isLoading = false;
+          errorMessage = 'Please login to continue';
         });
-        print('✅ User ID loaded: $currentUserId');
+      }
+    }
+  }
+bool _isItemFounder(dynamic item) {
+  if (item['user_id'] != null) {
+    try {
+      int itemUserId;
+      if (item['user_id'] is String) {
+        itemUserId = int.tryParse(item['user_id']) ?? 0;
+      } else {
+        itemUserId = item['user_id'] as int;
+      }
+      
+      if (itemUserId > 0 && itemUserId == currentUserId) {
+        return true;
       }
     } catch (e) {
-      print('❌ Error loading user data: $e');
+      // 
     }
   }
-
-  // Safe integer parsing helper
-  int? _safeParseInt(dynamic value) {
-    if (value == null) return null;
-    if (value is int) return value;
-    if (value is String) {
-      return int.tryParse(value);
-    }
-    if (value is double) {
-      return value.toInt();
-    }
-    return null;
+  
+  String itemReporterName = (item['reporter_name'] ?? '').toString().trim().toLowerCase();
+  String currentName = (currentUserName ?? '').trim().toLowerCase();
+  
+  if (itemReporterName.isNotEmpty && 
+      itemReporterName != 'hidden' && 
+      itemReporterName == currentName) {
+    return true;
   }
-
-  // Safe string parsing helper
-  String _safeParseString(dynamic value, {String defaultValue = ''}) {
-    if (value == null) return defaultValue;
-    return value.toString();
-  }
-
-  // Check if item belongs to current user
-  bool _isMyItem(Map<String, dynamic> item) {
-    if (currentUserId == null) return false;
+  
+  if (item['reporter_phone'] != null && currentUserPhone != null) {
+    String itemPhone = item['reporter_phone'].toString().trim();
+    String currentPhone = currentUserPhone!.trim();
     
-    final dynamic itemUserId = item['user_id'];
-    final int? parsedItemUserId = _safeParseInt(itemUserId);
-    
-    return parsedItemUserId != null && parsedItemUserId == currentUserId;
-  }
-
-  Future<void> _loadPinnedItems() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final pinnedList = prefs.getStringList('pinned_items') ?? [];
-      
-      setState(() {
-        pinnedItems = pinnedList
-            .map((e) => int.tryParse(e) ?? 0)
-            .where((id) => id > 0)
-            .toSet();
-      });
-      print('📌 Loaded pinned items: $pinnedItems');
-    } catch (e) {
-      print('❌ Error loading pinned items: $e');
-      pinnedItems = {};
+    if (itemPhone.isNotEmpty && 
+        itemPhone != 'hidden' && 
+        itemPhone == currentPhone) {
+      return true;
     }
   }
+  return false;
+}
+  
+  void _startNotificationTimer() {
+    _notificationTimer?.cancel();
+    _notificationTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (currentUserId != null && mounted) {
+        _loadNotificationCount();
+      }
+    });
+  }
 
-  Future<void> _togglePinItem(int itemId) async {
-    if (itemId <= 0) return;
+  Future<void> _loadNotificationCount() async {
+    if (currentUserId == null || !mounted) return;
     
     try {
-      setState(() {
-        if (pinnedItems.contains(itemId)) {
-          pinnedItems.remove(itemId);
-        } else {
-          pinnedItems.add(itemId);
-        }
-      });
-      
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setStringList(
-        'pinned_items',
-        pinnedItems.map((e) => e.toString()).toList(),
+      final result = await NotificationService.getNotifications(
+        userId: currentUserId!,
       );
       
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              pinnedItems.contains(itemId) 
-                  ? 'Item pinned' 
-                  : 'Item unpinned',
-            ),
-            duration: const Duration(seconds: 1),
-          ),
-        );
-      }
-    } catch (e) {
-      print('❌ Error toggling pin: $e');
-    }
-  }
-
-  bool _isItemPinned(int itemId) {
-    return pinnedItems.contains(itemId);
-  }
-
-  Future<void> _loadItems() async {
-    if (!mounted) return;
-    
-    setState(() {
-      isLoading = true;
-      errorMessage = null;
-    });
-
-    try {
-      final lostResult = await ApiService.getItems(type: 'lost');
-      final foundResult = await ApiService.getItems(type: 'found');
-
-      if (mounted) {
+      if (result['success'] == true && mounted) {
         setState(() {
-          isLoading = false;
-
-          // Safely parse lost items
-          if (lostResult['success'] == true && lostResult['items'] != null) {
-            lostItems = _parseItems(lostResult['items']);
-          } else {
-            errorMessage = _safeParseString(lostResult['message']);
-          }
-
-          // Safely parse found items
-          if (foundResult['success'] == true && foundResult['items'] != null) {
-            foundItems = _parseItems(foundResult['items']);
-          } else if (errorMessage == null) {
-            errorMessage = _safeParseString(foundResult['message']);
-          }
-
-          // Combine and sort recent items
-          _updateRecentItems();
+          _notificationCount = result['unread_count'] ?? 0;
         });
       }
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          isLoading = false;
-          errorMessage = 'Failed to load items: $e';
-        });
-      }
+      // 
     }
   }
 
-  List<Map<String, dynamic>> _parseItems(dynamic items) {
-    if (items == null) return [];
+  Future<void> _loadRequestedItems() async {
+    if (currentUserId == null || !mounted) return;
     
     try {
-      if (items is List) {
-        return items.map((item) {
-          if (item is Map<String, dynamic>) {
-            return item;
-          } else if (item is Map) {
-            // Convert Map<dynamic, dynamic> to Map<String, dynamic>
-            return item.map((key, value) => MapEntry(key.toString(), value));
-          }
-          return <String, dynamic>{};
-        }).toList();
-      }
-    } catch (e) {
-      print('❌ Error parsing items: $e');
-    }
-    return [];
-  }
-
-  void _updateRecentItems() {
-    recentItems = [...lostItems, ...foundItems];
-    recentItems.sort((a, b) {
-      final String aDate = _safeParseString(a['created_at']);
-      final String bDate = _safeParseString(b['created_at']);
+      final result = await ApiService.getUserRequests(userId: currentUserId!);
       
-      try {
-        final DateTime aDateTime = DateTime.parse(aDate);
-        final DateTime bDateTime = DateTime.parse(bDate);
-        return bDateTime.compareTo(aDateTime);
-      } catch (e) {
-        return 0;
+      if (result['success'] == true && result['requests'] != null && mounted) {
+        setState(() {
+          requestedItems.clear();
+          approvedItems.clear();
+          requestStatus.clear();
+          
+          for (var req in result['requests']) {
+            int itemId = req['item_id'] is String 
+                ? int.parse(req['item_id']) 
+                : req['item_id'];
+            String status = req['status'] ?? 'pending';
+            
+            requestStatus[itemId] = status;
+            
+            if (status == 'approved') {
+              approvedItems.add(itemId);
+            } else if (status == 'pending') {
+              requestedItems.add(itemId);
+            }
+          }
+        });
       }
-    });
-    
-    if (recentItems.length > 10) {
-      recentItems = recentItems.sublist(0, 10);
+    } catch (e) {
+      // 
     }
   }
 
-  String _getImageUrl(String? path) {
-    if (path == null || path.isEmpty) return '';
-    if (path.startsWith('http')) return path;
-    return 'https://astufindit.x10.mx/index/$path';
-  }
+Future<void> _loadItems() async {
+  if (!mounted) return;
+  
+  setState(() {
+    isLoading = true;
+    errorMessage = null;
+  });
 
-  void _showFullScreenImage(String imagePath) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => Scaffold(
-          backgroundColor: Colors.black,
-          appBar: AppBar(
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-            leading: IconButton(
-              icon: const Icon(Icons.close, color: Colors.white),
-              onPressed: () => Navigator.pop(context),
-            ),
-          ),
-          body: Center(
-            child: InteractiveViewer(
-              minScale: 0.5,
-              maxScale: 4.0,
-              child: Image.network(
-                 _getImageUrl(imagePath),
-                fit: BoxFit.contain,
-                // placeholder: (context, url) => const Center(
-                //   child: CircularProgressIndicator(color: Colors.white),
-                // ),
-                // errorWidget: (context, url, error) => Column(
-                //   mainAxisAlignment: MainAxisAlignment.center,
-                //   children: [
-                //     const Icon(Icons.error, color: Colors.white, size: 50),
-                //     const SizedBox(height: 16),
-                //     Text(
-                //       'Failed to load image',
-                //       style: TextStyle(color: Colors.grey[400]),
-                //     ),
-                //   ],
-                // ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  try {
+    final lostResult = await ApiService.getItems(type: 'lost');
+    final foundResult = await ApiService.getFoundItems(userId: currentUserId);
 
+    if (mounted) {
+      setState(() {
+        isLoading = false;
+
+        if (lostResult['success'] == true) {
+          lostItems = lostResult['items'] ?? [];
+        }
+
+        if (foundResult['success'] == true) {
+          foundItems = foundResult['items'] ?? [];
+          
+          approvedItems.clear();
+          requestedItems.clear();
+          requestStatus.clear();
+          
+          for (var item in foundItems) {
+            int itemId = item['id'] is String ? int.parse(item['id']) : item['id'];
+            
+            bool isFounder = _isItemFounder(item);
+            
+            if (isFounder) {
+              approvedItems.add(itemId);
+              requestStatus[itemId] = 'approved';
+              item['is_restricted'] = false;
+              item['access_level'] = 'accessible';
+            } else {
+              String accessLevel = item['access_level'] ?? 'restricted';
+              
+              if (accessLevel == 'accessible') {
+                approvedItems.add(itemId);
+                requestStatus[itemId] = 'approved';
+              } else if (accessLevel == 'pending') {
+                requestedItems.add(itemId);
+                requestStatus[itemId] = 'pending';
+              }
+            }
+          }
+        }
+      });
+    }
+  } catch (e) {
+    if (mounted) {
+      setState(() {
+        isLoading = false;
+        errorMessage = 'Failed to load items!';
+      });
+    }
+  }
+}
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        elevation: 0,
         title: FutureBuilder<String?>(
           future: AuthService.getUserName(),
           builder: (context, snapshot) {
-            final String? userName = snapshot.data;
-            if (userName != null && userName.isNotEmpty) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Lost & Found',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.normal),
-                  ),
-                  Text(
-                    'Welcome, $userName',
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w300),
-                  ),
-                ],
-              );
-            }
-            return const Text('Lost & Found Dashboard');
+            if (!mounted) return const SizedBox.shrink();
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Lost & Found',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.normal),
+                ),
+                Text(
+                  'Welcome, ${snapshot.data ?? 'User'}',
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w300),
+                ),
+              ],
+            );
           },
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadItems,
-            tooltip: 'Refresh',
-          ),
           Stack(
             children: [
               IconButton(
-                icon: const Icon(Icons.notifications_none),
-                onPressed: _showPinnedItems,
-                tooltip: 'Pinned Items',
+                icon: const Icon(Icons.notifications),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+                  ).then((_) => _loadNotificationCount());
+                },
               ),
-              if (pinnedItems.isNotEmpty)
+              if (_notificationCount > 0)
                 Positioned(
                   right: 8,
                   top: 8,
                   child: Container(
                     padding: const EdgeInsets.all(2),
-                    decoration: const BoxDecoration(
+                    decoration: BoxDecoration(
                       color: Colors.red,
-                      shape: BoxShape.circle,
+                      borderRadius: BorderRadius.circular(10),
                     ),
                     constraints: const BoxConstraints(
                       minWidth: 16,
                       minHeight: 16,
                     ),
                     child: Text(
-                      '${pinnedItems.length}',
+                      _notificationCount > 9 ? '9+' : '$_notificationCount',
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 10,
@@ -348,53 +297,39 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ),
             ],
           ),
+          
           IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () async {
-              await AuthService.logout();
-              if (!mounted) return;
-              Navigator.pushReplacement(
+            icon: const Icon(Icons.person),
+            onPressed: () {
+              Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => const LoginScreen()),
+                MaterialPageRoute(builder: (_) => const ProfileScreen()),
               );
             },
-            tooltip: 'Logout',
+          ),
+          
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadItems,
           ),
         ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(50),
-          child: Column(
-            children: [
-              TabBar(
-                controller: _tabController,
-                indicatorColor: Colors.blue,
-                labelColor: Colors.blue,
-                unselectedLabelColor: Colors.grey,
-                tabs: const [
-                  Tab(text: 'Lost Items', icon: Icon(Icons.search_off)),
-                  Tab(text: 'Found Items', icon: Icon(Icons.check_circle)),
-                ],
-              ),
-            ],
-          ),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(text: 'Lost Items', icon: Icon(Icons.search_off)),
+            Tab(text: 'Found Items', icon: Icon(Icons.check_circle)),
+          ],
         ),
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : errorMessage != null
               ? _buildErrorView()
-              : Column(
+              : TabBarView(
+                  controller: _tabController,
                   children: [
-                    if (recentItems.isNotEmpty) _buildRecentCarousel(),
-                    Expanded(
-                      child: TabBarView(
-                        controller: _tabController,
-                        children: [
-                          _buildItemList(lostItems, 'No lost items reported yet', Colors.red),
-                          _buildItemList(foundItems, 'No found items reported yet', Colors.green),
-                        ],
-                      ),
-                    ),
+                    _buildLostItemsList(),
+                    _buildFoundItemsList(),
                   ],
                 ),
       floatingActionButton: FloatingActionButton.extended(
@@ -402,23 +337,160 @@ class _DashboardScreenState extends State<DashboardScreen>
           Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => const ReportItemScreen()),
-          ).then((_) {
-            _loadItems();
-          });
+          ).then((_) => _loadItems());
         },
         icon: const Icon(Icons.add),
         label: const Text('Report Item'),
-        backgroundColor: Colors.blue,
       ),
     );
   }
+  Widget _buildLostItemsList() {
+    if (lostItems.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.search_off, size: 64, color: Colors.grey[400]),
+            const SizedBox(height: 16),
+            Text('No lost items reported', style: TextStyle(color: Colors.grey[600])),
+          ],
+        ),
+      );
+    }
 
-  void _showPinnedItems() {
-    final pinnedList = recentItems.where((item) {
-      final int? itemId = _safeParseInt(item['id']);
-      return itemId != null && pinnedItems.contains(itemId);
-    }).toList();
-    
+    return RefreshIndicator(
+      onRefresh: _loadItems,
+      child: ListView.builder(
+        padding: const EdgeInsets.all(8),
+        itemCount: lostItems.length,
+        itemBuilder: (context, index) {
+          final item = lostItems[index];
+          return _buildLostItemCard(item);
+        },
+      ),
+    );
+  }
+Widget _buildLostItemCard(dynamic item) {
+  final bool isFounder = _isItemFounder(item);
+  
+  return Card(
+    margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+    elevation: 2,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    child: InkWell(
+      onTap: () => _showLostItemDetails(item),
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: item['image_path'] != null
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.network(
+                        _getImageUrl(item['image_path']),
+                        fit: BoxFit.cover,
+                        width: 80,
+                        height: 80,
+                        errorBuilder: (_, __, ___) => Icon(Icons.image_not_supported, color: Colors.red),
+                      ),
+                    )
+                  : Icon(Icons.search_off, color: Colors.red, size: 40),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          item['title'] ?? 'No title',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                      ),
+                      // Founder badge
+                      if (isFounder)
+                        Container(
+                          margin: const EdgeInsets.only(right: 4),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.person, size: 10, color: Colors.blue[700]),
+                              const SizedBox(width: 2),
+                              Text(
+                                'YOU',
+                                style: TextStyle(
+                                  color: Colors.blue[700],
+                                  fontSize: 8,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Text('LOST', style: TextStyle(color: Colors.red, fontSize: 10)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    item['description'] ?? '',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: Colors.grey[600]),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Icon(Icons.location_on, size: 14, color: Colors.grey[500]),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          item['location'] ?? 'Unknown',
+                          style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                        ),
+                      ),
+                      if (isFounder)
+                        Text(
+                          ' • You reported this',
+                          style: TextStyle(color: Colors.blue[400], fontSize: 10, fontStyle: FontStyle.italic),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+  void _showLostItemDetails(dynamic item) {
+    final TextEditingController messageController = TextEditingController();
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -426,13 +498,17 @@ class _DashboardScreenState extends State<DashboardScreen>
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.7,
+        initialChildSize: 0.9,
         minChildSize: 0.5,
-        maxChildSize: 0.9,
+        maxChildSize: 0.95,
         expand: false,
         builder: (context, scrollController) {
           return Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -446,47 +522,137 @@ class _DashboardScreenState extends State<DashboardScreen>
                     ),
                   ),
                 ),
+                const SizedBox(height: 20),
+                
+                if (item['image_path'] != null)
+                  Container(
+                    height: 200,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.network(
+                        _getImageUrl(item['image_path']),
+                        fit: BoxFit.cover,
+                        width: double.infinity,
+                        height: 200,
+                      ),
+                    ),
+                  ),
+                
                 const SizedBox(height: 16),
-                const Text(
-                  'Pinned Items',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Text('LOST ITEM', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                    ),
+                  ],
                 ),
+                
                 const SizedBox(height: 8),
+                
                 Text(
-                  pinnedList.isEmpty 
-                      ? 'No pinned items yet' 
-                      : '${pinnedList.length} item${pinnedList.length > 1 ? 's' : ''} pinned',
-                  style: const TextStyle(color: Colors.grey),
+                  item['title'] ?? 'No title',
+                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                 ),
+                
                 const SizedBox(height: 16),
-                Expanded(
-                  child: pinnedList.isEmpty
-                      ? Center(
+              if (_isItemFounder(item))
+                Container(
+                  margin: const EdgeInsets.only(top: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.person, size: 16, color: Colors.blue[700]),
+                      const SizedBox(width: 6),
+                      Text(
+                        'You reported this item',
+                        style: TextStyle(
+                          color: Colors.blue[700],
+                          fontWeight: FontWeight.w500,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                  Expanded(
+                  child: ListView(
+                    controller: scrollController,
+                    children: [
+                      _buildDetailSection('Description', item['description'] ?? 'No description'),
+                      _buildDetailSection('Location', item['location'] ?? 'Unknown'),
+                      _buildDetailSection('Category', item['category'] ?? 'Other'),
+                      _buildDetailSection('Lost By', '${item['reporter_name']} • ${item['reporter_phone']}'),
+                      _buildDetailSection('Date Lost', _formatDate(item['created_at'])),
+                      
+                      const SizedBox(height: 20),
+                      Card(
+                        color: Colors.green[50],
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
                           child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.push_pin, size: 64, color: Colors.grey[400]),
-                              const SizedBox(height: 16),
-                              Text(
-                                'No pinned items yet',
-                                style: TextStyle(color: Colors.grey[600]),
-                              ),
+                              const Icon(Icons.check_circle, color: Colors.green, size: 40),
                               const SizedBox(height: 8),
+                              const Text(
+                                'Did you find this item?',
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                              ),
+                              const SizedBox(height: 4),
                               Text(
-                                'Tap the pin icon on items to save them',
-                                style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                                'Report that you have found this item. Admin will verify and connect you with the owner.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                              ),
+                              const SizedBox(height: 16),
+                              TextField(
+                                controller: messageController,
+                                maxLines: 3,
+                                decoration: const InputDecoration(
+                                  hintText: 'Tell us where and when you found it...',
+                                  border: OutlineInputBorder(),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  onPressed: () {
+                                    int itemId = item['id'] is String 
+                                        ? int.parse(item['id']) 
+                                        : item['id'];
+                                    _reportFoundMatch(itemId, messageController.text);
+                                  },
+                                  icon: const Icon(Icons.check_circle),
+                                  label: const Text('I Found This Item'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                  ),
+                                ),
                               ),
                             ],
                           ),
-                        )
-                      : ListView.builder(
-                          controller: scrollController,
-                          itemCount: pinnedList.length,
-                          itemBuilder: (context, index) {
-                            final item = pinnedList[index];
-                            return _buildPinnedItem(item);
-                          },
                         ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -496,298 +662,15 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  Widget _buildPinnedItem(Map<String, dynamic> item) {
-    final String type = _safeParseString(item['type']);
-    final bool isLost = type == 'lost';
-    final Color color = isLost ? Colors.red : Colors.green;
-    final int? itemId = _safeParseInt(item['id']);
-    
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: color.withOpacity(0.1),
-          child: Icon(
-            isLost ? Icons.search_off : Icons.check_circle,
-            color: color,
-          ),
-        ),
-        title: Text(_safeParseString(item['title'], defaultValue: 'No title')),
-        subtitle: Text(_safeParseString(item['location'], defaultValue: 'Unknown location')),
-        trailing: IconButton(
-          icon: const Icon(Icons.push_pin, color: Colors.blue),
-          onPressed: () {
-            if (itemId != null) {
-              _togglePinItem(itemId);
-              Navigator.pop(context);
-            }
-          },
-        ),
-        onTap: () => _showItemDetails(item),
-      ),
-    );
-  }
-  Widget _buildRecentCarousel() {
-    return Container(
-      height: 240,
-      margin: const EdgeInsets.only(top: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Recent Items',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                Text(
-                  '${_currentFeaturedPage + 1}/${recentItems.length}',
-                  style: const TextStyle(color: Colors.grey),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          Expanded(
-            child: PageView.builder(
-              controller: _featuredPageController,
-              itemCount: recentItems.length,
-              itemBuilder: (context, index) {
-                final item = recentItems[index];
-                return _buildRecentItemCard(item);
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRecentItemCard(Map<String, dynamic> item) {
-    final String type = _safeParseString(item['type']);
-    final bool isLost = type == 'lost';
-    final Color color = isLost ? Colors.red : Colors.green;
-    final String imagePath = _safeParseString(item['image_path']);
-    final bool hasImage = imagePath.isNotEmpty;
-    final int? itemId = _safeParseInt(item['id']);
-    
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: color.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Stack(
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-
-// With this:
-if (hasImage)
-  GestureDetector(
-    onTap: () => _showFullScreenImage(imagePath),
-    child: Container(
-      height: 120,
-      decoration: BoxDecoration(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-      ),
-      child: ClipRRect(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-        child: Image.network(
-          _getImageUrl(imagePath),
-          fit: BoxFit.cover,
-          width: double.infinity,
-          height: 120,
-          errorBuilder: (context, error, stackTrace) {
-            print('❌ Image error in recent card: $error');
-            return Container(
-              color: Colors.grey[200],
-              child: Center(
-                child: Icon(
-                  Icons.broken_image,
-                  color: Colors.grey[400],
-                  size: 40,
-                ),
-              ),
-            );
-          },
-          loadingBuilder: (context, child, loadingProgress) {
-            if (loadingProgress == null) return child;
-            return Container(
-              color: Colors.grey[200],
-              child: Center(
-                child: CircularProgressIndicator(
-                  value: loadingProgress.expectedTotalBytes != null
-                      ? loadingProgress.cumulativeBytesLoaded / 
-                        loadingProgress.expectedTotalBytes!
-                      : null,
-                ),
-              ),
-            );
-          },
-        ),
-      ),
-    ),
-  )
-              else
-                Container(
-                  height: 80,
-                  decoration: BoxDecoration(
-                    color: color.withOpacity(0.1),
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-                  ),
-                  child: Center(
-                    child: Icon(
-                      isLost ? Icons.search_off : Icons.check_circle,
-                      color: color,
-                      size: 40,
-                    ),
-                  ),
-                ),
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            _safeParseString(item['title'], defaultValue: 'No title'),
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: color.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            isLost ? 'LOST' : 'FOUND',
-                            style: TextStyle(
-                              color: color,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _safeParseString(item['description']),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12, color: Colors.grey),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Icon(Icons.location_on, size: 14, color: Colors.grey[600]),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            _safeParseString(item['location'], defaultValue: 'Unknown location'),
-                            style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          if (itemId != null)
-            Positioned(
-              top: hasImage ? 8 : 8,
-              right: 8,
-              child: IconButton(
-                icon: Icon(
-                  _isItemPinned(itemId) ? Icons.push_pin : Icons.push_pin_outlined,
-                  color: _isItemPinned(itemId) ? Colors.blue : Colors.grey,
-                  size: 20,
-                ),
-                onPressed: () => _togglePinItem(itemId),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildErrorView() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.error_outline,
-              size: 64,
-              color: Colors.red[400],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              errorMessage ?? 'Unknown error occurred',
-              style: const TextStyle(fontSize: 16, color: Colors.red),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: _loadItems,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Try Again'),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildItemList(List<Map<String, dynamic>> items, String emptyMessage, Color color) {
-    if (items.isEmpty) {
+  Widget _buildFoundItemsList() {
+    if (foundItems.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              color == Colors.red ? Icons.search_off : Icons.check_circle,
-              size: 64,
-              color: Colors.grey[400],
-            ),
+            Icon(Icons.check_circle, size: 64, color: Colors.grey[400]),
             const SizedBox(height: 16),
-            Text(
-              emptyMessage,
-              style: const TextStyle(fontSize: 16, color: Colors.grey),
-              textAlign: TextAlign.center,
-            ),
+            Text('No found items reported', style: TextStyle(color: Colors.grey[600])),
           ],
         ),
       );
@@ -795,588 +678,925 @@ if (hasImage)
 
     return RefreshIndicator(
       onRefresh: _loadItems,
-      color: color,
       child: ListView.builder(
         padding: const EdgeInsets.all(8),
-        itemCount: items.length,
+        itemCount: foundItems.length,
         itemBuilder: (context, index) {
-          final item = items[index];
-          return _buildListItem(item, color);
+          final item = foundItems[index];
+          return _buildFoundItemCard(item);
         },
       ),
     );
   }
 
-  Widget _buildListItem(Map<String, dynamic> item, Color color) {
-    final bool isLost = color == Colors.red;
-    final String imagePath = _safeParseString(item['image_path']);
-    final bool hasImage = imagePath.isNotEmpty;
-    final int? itemId = _safeParseInt(item['id']);
-    final bool isPinned = itemId != null && _isItemPinned(itemId);
-    final bool isMyItem = _isMyItem(item);
-    
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: InkWell(
-        onTap: () => _showItemDetails(item),
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-// Replace the image section:
-GestureDetector(
-  onTap: hasImage ? () => _showFullScreenImage(imagePath) : null,
-  child: Container(
-    width: 80,
-    height: 80,
-    decoration: BoxDecoration(
-      color: hasImage ? Colors.transparent : color.withOpacity(0.1),
-      borderRadius: BorderRadius.circular(8),
-    ),
-    child: hasImage
-        ? ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Image.network(
-              _getImageUrl(imagePath),
-              fit: BoxFit.cover,
-              width: 80,
-              height: 80,
-              errorBuilder: (context, error, stackTrace) {
-                print('❌ Image error in list item: $error');
-                return Container(
-                  color: Colors.grey[200],
-                  child: Icon(
-                    Icons.broken_image,
-                    color: Colors.grey[400],
+Widget _buildFoundItemCard(dynamic item) {
+  int itemId = item['id'] is String ? int.parse(item['id']) : item['id'];
+  
+  final bool isFounder = _isItemFounder(item);
+  final String accessLevel = isFounder ? 'accessible' : (item['access_level'] ?? 'restricted');
+  final bool isClaimed = item['status'] == 'claimed';
+  
+  final bool hasApproved = isFounder || 
+                          accessLevel == 'accessible' || 
+                          approvedItems.contains(itemId);
+  
+  final bool hasPending = !isFounder && (
+                         accessLevel == 'pending' || 
+                         requestedItems.contains(itemId) ||
+                         requestStatus[itemId] == 'pending');
+  
+  final bool isRejected = !isFounder && requestStatus[itemId] == 'rejected';
+
+  return Card(
+    margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+    elevation: 2,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    child: InkWell(
+      onTap: () {
+        if (hasApproved) {
+          _showFoundItemDetails(item);
+        } else if (hasPending) {
+          _showPendingDialog();
+        } else if (isRejected) {
+          _showRejectedDialog();
+        } else if (!isClaimed) {
+          _showRequestAccessDialog(item);
+        }
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Stack(
+              children: [
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                );
-              },
-              loadingBuilder: (context, child, loadingProgress) {
-                if (loadingProgress == null) return child;
-                return Container(
-                  color: Colors.grey[200],
-                  child: Center(
-                    child: SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        value: loadingProgress.expectedTotalBytes != null
-                            ? loadingProgress.cumulativeBytesLoaded / 
-                              loadingProgress.expectedTotalBytes!
-                            : null,
+                  child: item['image_path'] != null
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                            _getImageUrl(item['image_path']),
+                            fit: BoxFit.cover,
+                            width: 80,
+                            height: 80,
+                            errorBuilder: (_, __, ___) => Icon(Icons.broken_image, color: Colors.green),
+                          ),
+                        )
+                      : Icon(Icons.check_circle, color: Colors.green, size: 40),
+                ),
+                if (!hasApproved && !isFounder)
+                  Positioned.fill(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                        child: Container(
+                          color: Colors.black.withOpacity(0.2),
+                        ),
                       ),
                     ),
                   ),
-                );
-              },
+                
+                if (!hasApproved && !isFounder)
+                  Positioned.fill(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        color: Colors.black.withOpacity(0.3),
+                      ),
+                      child: Center(
+                        child: Icon(
+                          isRejected ? Icons.block : Icons.lock,
+                          color: isRejected ? Colors.red : Colors.white,
+                          size: 30,
+                        ),
+                      ),
+                    ),
+                  ),
+                
+                if (hasApproved)
+                  const Positioned(
+                    top: 4,
+                    right: 4,
+                    child: CircleAvatar(
+                      radius: 12,
+                      backgroundColor: Colors.green,
+                      child: Icon(Icons.check, color: Colors.white, size: 16),
+                    ),
+                  ),
+
+                if (isFounder)
+                  const Positioned(
+                    top: 4,
+                    left: 4,
+                    child: CircleAvatar(
+                      radius: 12,
+                      backgroundColor: Colors.blue,
+                      child: Icon(Icons.person, color: Colors.white, size: 14),
+                    ),
+                  ),
+              ],
             ),
-          )
-        : Icon(
-            isLost ? Icons.search_off : Icons.check_circle,
-            color: color,
-            size: 40,
-          ),
-  ),
-),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            _safeParseString(item['title'], defaultValue: 'No title'),
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+            
+            const SizedBox(width: 12),
+            
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          item['title'] ?? 'No title',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                            color: hasApproved ? Colors.black : Colors.grey[700],
                           ),
                         ),
-                        if (isMyItem)
-                          Container(
-                            margin: const EdgeInsets.only(right: 4),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.blue.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: const Text(
-                              'MY ITEM',
-                              style: TextStyle(
-                                fontSize: 8,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.blue,
-                              ),
-                            ),
-                          ),
+                      ),
+                      if (isFounder)
                         Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
+                          margin: const EdgeInsets.only(right: 4),
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: color.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(12),
+                            color: Colors.blue.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
-                            _getTimeAgo(item['created_at']),
+                            'FOUNDER',
                             style: TextStyle(
-                              fontSize: 10,
-                              color: color.withOpacity(0.8),
+                              color: Colors.blue[700],
+                              fontSize: 8,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
                         ),
-                      ],
+                      
+                      // Status badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isClaimed 
+                              ? Colors.orange.withOpacity(0.1)
+                              : hasApproved
+                                  ? Colors.green.withOpacity(0.1)
+                                  : hasPending
+                                      ? Colors.blue.withOpacity(0.1)
+                                      : isRejected
+                                          ? Colors.red.withOpacity(0.1)
+                                          : Colors.grey.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          isClaimed 
+                              ? 'CLAIMED'
+                              : hasApproved
+                                  ? 'ACCESSIBLE'
+                                  : hasPending
+                                      ? 'PENDING'
+                                      : isRejected
+                                          ? 'REJECTED'
+                                          : 'FOUND',
+                          style: TextStyle(
+                            color: isClaimed 
+                                ? Colors.orange
+                                : hasApproved
+                                    ? Colors.green
+                                    : hasPending
+                                        ? Colors.blue
+                                        : isRejected
+                                            ? Colors.red
+                                            : Colors.grey,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(Icons.location_on, size: 14, color: Colors.grey[500]),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          item['location'] ?? 'Unknown',
+                          style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                  
+                  if (hasApproved) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      item['description'] ?? 'No description',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: Colors.grey[600], fontSize: 13),
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      _safeParseString(item['description']),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey[600],
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.location_on,
-                          size: 14,
-                          color: Colors.grey[500],
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            _safeParseString(item['location'], defaultValue: 'Unknown location'),
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[500],
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (itemId != null)
-                          IconButton(
-                            icon: Icon(
-                              isPinned ? Icons.push_pin : Icons.push_pin_outlined,
-                              color: isPinned ? Colors.blue : Colors.grey,
-                              size: 20,
-                            ),
-                            onPressed: () => _togglePinItem(itemId),
-                            constraints: const BoxConstraints(),
-                            padding: EdgeInsets.zero,
-                          ),
-                      ],
+                      'Reported by: ${item['reporter_name'] ?? 'Anonymous'}',
+                      style: TextStyle(color: Colors.grey[400], fontSize: 11),
                     ),
                   ],
+                  
+                  const SizedBox(height: 8),
+                  
+                  if (isFounder)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withOpacity(0.05),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline, size: 12, color: Colors.blue[400]),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              'You found this item',
+                              style: TextStyle(
+                                color: Colors.blue[400],
+                                fontSize: 10,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  
+                  if (!isClaimed && !hasApproved && !isFounder)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: hasPending
+                          ? Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Text(
+                                'Awaiting Review',
+                                style: TextStyle(color: Colors.blue, fontSize: 11),
+                              ),
+                            )
+                          : isRejected
+                              ? Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: const Text(
+                                    'Request Rejected',
+                                    style: TextStyle(color: Colors.red, fontSize: 11),
+                                  ),
+                                )
+                              : TextButton.icon(
+                                  onPressed: () => _showRequestAccessDialog(item),
+                                  icon: const Icon(Icons.lock_open, size: 16),
+                                  label: const Text('This is my item!'),
+                                  style: TextButton.styleFrom(
+                                    backgroundColor: Colors.green[50],
+                                    foregroundColor: Colors.green[800],
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                  ),
+                                ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+ 
+  void _showRequestAccessDialog(dynamic item) {
+    final TextEditingController messageController = TextEditingController();
+    final _formKey = GlobalKey<FormState>();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.help, color: Colors.blue[700]),
+            const SizedBox(width: 8),
+            const Text('Claim This Item'),
+          ],
+        ),
+        content: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Please provide details to prove this item belongs to you:',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue[100]!),
                 ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Item: ${item['title']}', 
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                    Text('Found at: ${item['location']}'),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Describe unique features, when you lost it, or any proof:',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: messageController,
+                maxLines: 4,
+                decoration: InputDecoration(
+                  hintText: 'e.g., serial number, color, scratches, when/where you lost it...',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  filled: true,
+                  fillColor: Colors.grey[50],
+                ),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Please provide some details';
+                  }
+                  if (value.length < 10) {
+                    return 'Please provide more details (min 10 characters)';
+                  }
+                  return null;
+                },
               ),
             ],
           ),
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () async {
+              if (_formKey.currentState!.validate()) {
+                Navigator.pop(context);
+                int itemId = item['id'] is String ? int.parse(item['id']) : item['id'];
+                await _submitAccessRequest(itemId, messageController.text);
+              }
+            },
+            icon: const Icon(Icons.send),
+            label: const Text('Submit Claim'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
       ),
     );
   }
+  Future<void> _submitAccessRequest(int itemId, String message) async {
+    if (message.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please provide details about your item'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
 
-  void _showItemDetails(Map<String, dynamic> item) {
+    if (currentUserId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You must be logged in'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    setState(() => isLoading = true);
+
+    try {
+      
+      final result = await ApiService.requestItemAccess(
+        userId: currentUserId!,
+        itemId: itemId,
+        message: message,
+      );
+
+
+      if (result['success'] == true) {
+        setState(() {
+          requestedItems.add(itemId);
+          requestStatus[itemId] = 'pending';
+        });
+        
+        _showSuccessDialog(
+          'Claim submitted successfully!', 
+          'Admin will review your request. You will be notified once approved.'
+        );
+        
+        _loadItems();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result['message'] ?? 'Failed to submit claim'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() => isLoading = false);
+    }
+  }
+
+  void _showFoundItemDetails(dynamic item) {
+    
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => _buildItemDetailsSheet(item),
-    );
-  }
-
-  Widget _buildItemDetailsSheet(Map<String, dynamic> item) {
-    final String type = _safeParseString(item['type']);
-    final bool isLost = type == 'lost';
-    final Color color = isLost ? Colors.red : Colors.green;
-    final String imagePath = _safeParseString(item['image_path']);
-    final bool hasImage = imagePath.isNotEmpty;
-    final int? itemId = _safeParseInt(item['id']);
-    final bool isPinned = itemId != null && _isItemPinned(itemId);
-    final bool isMyItem = _isMyItem(item);
-    
-    return DraggableScrollableSheet(
-      initialChildSize: 0.9,
-      minChildSize: 0.5,
-      maxChildSize: 0.95,
-      expand: false,
-      builder: (context, scrollController) {
-        return Container(
-          padding: const EdgeInsets.all(20),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[300],
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              
-// Replace the image section:
-if (hasImage)
-  GestureDetector(
-    onTap: () {
-      Navigator.pop(context);
-      _showFullScreenImage(imagePath);
-    },
-    child: Container(
-      height: 200,
-      width: double.infinity,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Stack(
-          children: [
-            Image.network(
-              _getImageUrl(imagePath),
-              fit: BoxFit.cover,
-              width: double.infinity,
-              height: 200,
-              errorBuilder: (context, error, stackTrace) {
-                print('❌ Image error in details: $error');
-                return Container(
-                  color: Colors.grey[200],
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.broken_image, size: 50, color: Colors.grey),
-                        const SizedBox(height: 8),
-                        Text('Failed to load image', style: TextStyle(color: Colors.grey)),
-                      ],
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.9,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) {
+          return Container(
+            padding: const EdgeInsets.all(20),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[300],
+                      borderRadius: BorderRadius.circular(2),
                     ),
                   ),
-                );
-              },
-            ),
-            Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.transparent,
-                    Colors.black.withOpacity(0.5),
-                  ],
                 ),
-              ),
-            ),
-            Positioned(
-              bottom: 12,
-              right: 12,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.black54,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.zoom_in, color: Colors.white, size: 16),
-                    SizedBox(width: 4),
-                    Text(
-                      'Tap to view fullscreen',
-                      style: TextStyle(color: Colors.white, fontSize: 12),
+                const SizedBox(height: 20),
+                
+                if (item['image_path'] != null)
+                  Container(
+                    height: 200,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
-  ),
-              if (hasImage) const SizedBox(height: 16),
-              
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: color.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Text(
-                                isLost ? 'LOST ITEM' : 'FOUND ITEM',
-                                style: TextStyle(
-                                  color: color,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                            if (isMyItem) ...[
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.blue.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                child: const Text(
-                                  'MY ITEM',
-                                  style: TextStyle(
-                                    color: Colors.blue,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _safeParseString(item['title'], defaultValue: 'No title'),
-                          style: const TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (itemId != null)
-                    IconButton(
-                      icon: Icon(
-                        isPinned ? Icons.push_pin : Icons.push_pin_outlined,
-                        color: isPinned ? Colors.blue : Colors.grey,
-                        size: 28,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.network(
+                        _getImageUrl(item['image_path']),
+                        fit: BoxFit.cover,
+                        width: double.infinity,
+                        height: 200,
                       ),
-                      onPressed: () {
-                        _togglePinItem(itemId);
-                        setState(() {});
-                      },
                     ),
-                ],
-              ),
-              
-              const SizedBox(height: 16),
-              
-              Expanded(
-                child: ListView(
-                  controller: scrollController,
+                  ),
+                
+                const SizedBox(height: 16),
+                
+                Row(
                   children: [
-                    _buildDetailSection(
-                      'Description',
-                      _safeParseString(item['description'], defaultValue: 'No description provided'),
-                      Icons.description,
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.green.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Text(
+                        'FOUND ITEM',
+                        style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
+                      ),
                     ),
-                    const SizedBox(height: 16),
-                    _buildDetailSection(
-                      'Location',
-                      _safeParseString(item['location'], defaultValue: 'Unknown location'),
-                      Icons.location_on,
-                    ),
-                    const SizedBox(height: 16),
-                    _buildDetailSection(
-                      'Category',
-                      _safeParseString(item['category'], defaultValue: 'Other'),
-                      Icons.category,
-                    ),
-                    const SizedBox(height: 16),
-                    _buildDetailSection(
-                      'Reported By',
-                      '${_safeParseString(item['reporter_name'], defaultValue: 'Anonymous')} • ${_safeParseString(item['reporter_phone'], defaultValue: 'No phone')}',
-                      Icons.person,
-                    ),
-                    const SizedBox(height: 16),
-                    _buildDetailSection(
-                      'Date Reported',
-                      _formatDate(item['created_at']),
-                      Icons.calendar_today,
-                    ),
-                    const SizedBox(height: 16),
-                    _buildDetailSection(
-                      'Status',
-                      _safeParseString(item['status'], defaultValue: 'Open'),
-                      Icons.info,
-                    ),
-                    
-                    const SizedBox(height: 20),
-                    
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: () {
-                              final phone = _safeParseString(item['reporter_phone']);
-                              if (phone.isNotEmpty) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Calling $phone...')),
-                                );
-                              } else {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('No phone number available')),
-                                );
-                              }
-                            },
-                            icon: const Icon(Icons.phone),
-                            label: const Text('Call'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.green,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Messaging feature coming soon')),
-                              );
-                            },
-                            icon: const Icon(Icons.message),
-                            label: const Text('Message'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                          ),
-                        ),
-                      ],
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Text(
+                        'ACCESS GRANTED',
+                        style: TextStyle(color: Colors.blue, fontSize: 11),
+                      ),
                     ),
                   ],
                 ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
 
-  Widget _buildDetailSection(String title, String content, IconData icon) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+if (_isItemFounder(item))
+  Container(
+    margin: const EdgeInsets.only(top: 8, bottom: 16),
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+    decoration: BoxDecoration(
+      color: Colors.blue.withOpacity(0.1),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: Colors.blue.withOpacity(0.3)),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          children: [
-            Icon(icon, size: 18, color: Colors.grey[600]),
-            const SizedBox(width: 8),
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: Colors.grey[800],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.grey[50],
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.grey[200]!),
-          ),
-          child: Text(
-            content,
-            style: const TextStyle(fontSize: 14, height: 1.5),
+        Icon(Icons.person, color: Colors.blue[700], size: 18),
+        const SizedBox(width: 8),
+        Text(
+          'You found this item',
+          style: TextStyle(
+            color: Colors.blue[700],
+            fontWeight: FontWeight.w500,
+            fontSize: 14,
           ),
         ),
       ],
+    ),
+  ),
+                const SizedBox(height: 8),
+                
+                Text(
+                  item['title'] ?? 'No title',
+                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                ),
+                                if (_isItemFounder(item))
+                  Container(
+                    margin: const EdgeInsets.only(top: 8, bottom: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.person, size: 16, color: Colors.blue[700]),
+                        const SizedBox(width: 6),
+                        Text(
+                          'You found this item',
+                          style: TextStyle(
+                            color: Colors.blue[700],
+                            fontWeight: FontWeight.w500,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 16),
+                
+                Expanded(
+                  child: ListView(
+                    controller: scrollController,
+                    children: [
+                      _buildDetailSection('Description', item['description'] ?? 'No description'),
+                      _buildDetailSection('Location', item['location'] ?? 'Unknown'),
+                      _buildDetailSection('Category', item['category'] ?? 'Other'),
+                      _buildDetailSection('Reported By', '${item['reporter_name'] ?? 'Anonymous'} • ${item['reporter_phone'] ?? 'No phone'}'),
+                      _buildDetailSection('Date Found', _formatDate(item['created_at'])),
+                      
+                      const SizedBox(height: 20),
+                      
+                      Card(
+                        color: Colors.green[50],
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            children: [
+                              const Icon(Icons.check_circle, color: Colors.green, size: 40),
+                              const SizedBox(height: 8),
+                              const Text(
+                                'You have access to this item',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Contact the finder to arrange return',
+                                style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      onPressed: () {
+                                        // TODO: Implement call
+                                      },
+                                      icon: const Icon(Icons.phone),
+                                      label: const Text('Call'),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: ElevatedButton.icon(
+                                      onPressed: () {
+                                        // TODO: Implement message
+                                      },
+                                      icon: const Icon(Icons.message),
+                                      label: const Text('Message'),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.green,
+                                        foregroundColor: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+  void _showPendingDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.hourglass_empty, color: Colors.orange[700]),
+            const SizedBox(width: 8),
+            const Text('Request Pending'),
+          ],
+        ),
+        content: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.orange[50],
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.access_time, size: 40, color: Colors.orange),
+              SizedBox(height: 12),
+              Text(
+                'Your request is pending admin approval.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontWeight: FontWeight.w500),
+              ),
+              SizedBox(height: 8),
+              Text(
+                'You will be notified once admin reviews your claim.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: Colors.grey),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
     );
   }
 
-  String _getTimeAgo(dynamic dateString) {
-    final String dateStr = _safeParseString(dateString);
-    if (dateStr.isEmpty) return 'Unknown';
-    
+  void _showRejectedDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.block, color: Colors.red[700]),
+            const SizedBox(width: 8),
+            const Text('Request Rejected'),
+          ],
+        ),
+        content: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.red[50],
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.block, size: 40, color: Colors.red),
+              SizedBox(height: 12),
+              Text(
+                'Your request was rejected by the admin.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontWeight: FontWeight.w500),
+              ),
+              SizedBox(height: 8),
+              Text(
+                'The details provided did not match the item.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: Colors.grey),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSuccessDialog(String title, String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.green[700]),
+            const SizedBox(width: 8),
+            Text(title),
+          ],
+        ),
+        content: Container(
+          padding: const EdgeInsets.all(8),
+          child: Text(message),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+  Future<void> _reportFoundMatch(int lostItemId, String message) async {
+    if (message.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please describe where and when you found it'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    if (currentUserName == null || currentUserName!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Your name is missing. Please login again.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    setState(() => isLoading = true);
+
     try {
-      final date = DateTime.parse(dateStr);
-      final now = DateTime.now();
-      final difference = now.difference(date);
-      
-      if (difference.inDays > 365) {
-        return '${(difference.inDays / 365).floor()}y ago';
-      } else if (difference.inDays > 30) {
-        return '${(difference.inDays / 30).floor()}mo ago';
-      } else if (difference.inDays > 0) {
-        return '${difference.inDays}d ago';
-      } else if (difference.inHours > 0) {
-        return '${difference.inHours}h ago';
-      } else if (difference.inMinutes > 0) {
-        return '${difference.inMinutes}m ago';
+      final result = await ApiService.reportFoundMatch(
+        lostItemId: lostItemId,
+        finderName: currentUserName!,
+        finderPhone: currentUserPhone ?? '',
+        finderMessage: message,
+        userId: currentUserId,
+      );
+
+      if (result['success'] == true) {
+        Navigator.pop(context); 
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result['message'] ?? 'Report submitted successfully!'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+        
+        _loadItems();
       } else {
-        return 'Just now';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result['message'] ?? 'Failed to submit report'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     } catch (e) {
-      return dateStr.length >= 10 ? dateStr.substring(0, 10) : dateStr;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() => isLoading = false);
     }
   }
-
-  String _formatDate(dynamic dateString) {
-    final String dateStr = _safeParseString(dateString);
-    if (dateStr.isEmpty) return 'Unknown';
-    
+  Widget _buildDetailSection(String title, String content) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+          ),
+          const SizedBox(height: 4),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.grey[50],
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey[200]!),
+            ),
+            child: Text(content),
+          ),
+        ],
+      ),
+    );
+  }
+  String _formatDate(String? dateString) {
+    if (dateString == null) return 'Unknown';
     try {
-      final date = DateTime.parse(dateStr);
-      return '${date.day}/${date.month}/${date.year} at ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
+      final date = DateTime.parse(dateString);
+      return '${date.day}/${date.month}/${date.year} at ${date.hour}:${date.minute}';
     } catch (e) {
-      return dateStr;
+      return dateString;
     }
   }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    _featuredPageController.dispose();
-    super.dispose();
+  Widget _buildErrorView() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.error_outline, size: 64, color: Colors.red[400]),
+          const SizedBox(height: 16),
+          Text(errorMessage!, style: const TextStyle(color: Colors.red)),
+          const SizedBox(height: 24),
+          ElevatedButton(
+            onPressed: _loadItems, 
+            child: const Text('Try Again'),
+          ),
+        ],
+      ),
+    );
+  }
+  String _getImageUrl(String? path) {
+    if (path == null || path.isEmpty) return '';
+    if (path.startsWith('http')) return path;
+    return 'https://astufindit.x10.mx/index/$path';
   }
 }

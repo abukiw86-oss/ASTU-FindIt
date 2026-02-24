@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
-import 'dashboard.dart'; // adjust path if needed
+import 'dashboard.dart'; 
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -41,7 +41,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
         throw Exception(registerResult['message'] ?? 'Registration failed');
       }
 
-      // 2. Auto-login immediately
       final loginResult = await ApiService.login(
         email: _emailController.text.trim(),
         password: _passwordController.text,
@@ -50,8 +49,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
       if (loginResult['success'] != true) {
         throw Exception(loginResult['message'] ?? 'Auto-login failed after registration');
       }
-
-      // 3. Save user data from login response
       final user = loginResult['user'] as Map<String, dynamic>;
 
       await AuthService.saveUser(
@@ -71,7 +68,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
         ),
       );
 
-      // 4. Go directly to dashboard
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const DashboardScreen()),
