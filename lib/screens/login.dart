@@ -46,8 +46,8 @@ class _LoginScreenState extends State<LoginScreen> {
         }
 
         await AuthService.saveUser(
-          id:  int.tryParse(user['id'].toString()) ?? 0,
           email: user['email'] as String,
+          userStringId: user['user_string_id'],
           fullName: user['full_name'] as String,
           phone: user['phone'] as String?,
           role: user['role'] as String,

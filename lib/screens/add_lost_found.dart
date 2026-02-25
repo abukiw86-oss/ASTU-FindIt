@@ -179,22 +179,39 @@ Future<void> _submit() async {
   });
   
   try {
-    final user = await AuthService.getUser();
-    int? userId = user?['id'];
+  final user = await AuthService.getUser();
+  String? userStringId = user?['user_string_id'];
+  
+  // CRITICAL: Check if user_string_id exists
+  if (userStringId == null || userStringId.isEmpty) {
+    // Try to refresh user data
+    final refreshedUser = await AuthService.getUser();
+    userStringId = refreshedUser?['user_string_id'];
     
-    final result = await ApiService.reportItem(
-      type: typeToSend,
-      title: _titleController.text.trim(),
-      description: _descriptionController.text.trim(),
-      location: _locationController.text.trim().isEmpty 
-          ? null 
-          : _locationController.text.trim(),
-      category: _selectedCategory,
-      imageFile: _selectedImage,
-      reporterName: _reporterName!.trim(),
-      reporterPhone: _reporterPhone!.trim(),
-      userId: userId, 
-    );
+    if (userStringId == null || userStringId.isEmpty) {
+      setState(() {
+        _errorMessage = 'User ID not found. Please login again.';
+        _isLoading = false;
+      });
+      return;
+    }
+  }
+  
+  print('✅ Using user_string_id: $userStringId');
+  
+  final result = await ApiService.reportItem(
+    type: typeToSend,
+    title: _titleController.text.trim(),
+    description: _descriptionController.text.trim(),
+    location: _locationController.text.trim().isEmpty 
+        ? null 
+        : _locationController.text.trim(),
+    category: _selectedCategory,
+    imageFile: _selectedImage,
+    reporterName: _reporterName!.trim(),
+    reporterPhone: _reporterPhone!.trim(),
+    userStringId: userStringId, 
+  );
 
     if (mounted) {
       setState(() {

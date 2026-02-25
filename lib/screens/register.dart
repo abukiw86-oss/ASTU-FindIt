@@ -29,7 +29,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     });
 
     try {
-      // 1. Register
       final registerResult = await ApiService.register(
         email: _emailController.text.trim(),
         password: _passwordController.text,
@@ -52,7 +51,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       final user = loginResult['user'] as Map<String, dynamic>;
 
       await AuthService.saveUser(
-        id: int.tryParse(user['id'].toString()) ?? 0,
+        userStringId: user['user_string_id'],
         email: user['email'] as String,
         fullName: user['full_name'] as String,
         phone: user['phone'] as String?,

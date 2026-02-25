@@ -6,7 +6,7 @@ import 'api_service.dart';
 class NotificationService {
   static const String baseUrl = ApiService.baseUrl;
 
-  static Future<Map<String, dynamic>> getNotifications({required int userId}) async {
+  static Future<Map<String, dynamic>> getNotifications({required String userId}) async {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl?action=get-notifications&user_id=$userId'),
@@ -24,7 +24,7 @@ class NotificationService {
 
   static Future<Map<String, dynamic>> markAsRead({
     required int notificationId,
-    required int userId,
+    required String userId,
   }) async {
     try {
       final response = await http.post(
@@ -42,7 +42,7 @@ class NotificationService {
     }
   }
 
-  static Future<Map<String, dynamic>> markAllAsRead({required int userId}) async {
+  static Future<Map<String, dynamic>> markAllAsRead({required String userId}) async {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl?action=mark-all-notifications-read'),

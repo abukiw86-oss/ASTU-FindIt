@@ -5,7 +5,7 @@ import '../services/api_service.dart';
 import '../services/notification_service.dart';
 import 'add_lost_found.dart';
 import '../services/auth_service.dart';
-import 'login.dart';
+import 'report_individual.dart';
 import 'notification.dart';
 import 'profile.dart';
 
@@ -15,11 +15,10 @@ class DashboardScreen extends StatefulWidget {
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
-
 class _DashboardScreenState extends State<DashboardScreen>
     with TickerProviderStateMixin {
   late TabController _tabController;
-  
+
   int _notificationCount = 0;
   Timer? _notificationTimer;
 
@@ -35,6 +34,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   Set<int> requestedItems = {};
   Set<int> approvedItems = {};
   Map<int, String> requestStatus = {};
+  String? currentUserStringId;
 
   @override
   void initState() {
@@ -50,46 +50,41 @@ class _DashboardScreenState extends State<DashboardScreen>
     super.dispose();
   }
 
-  Future<void> _loadUserData() async {
-    final user = await AuthService.getUser();
-    if (user != null && mounted) {
+Future<void> _loadUserData() async {
+  final user = await AuthService.getUser();
+  if (user != null && mounted) {
+    setState(() {
+      currentUserId = user['id'];
+      currentUserStringId = user['user_string_id']; 
+      currentUserName = user['full_name'];
+      currentUserPhone = user['phone'];
+    });
+    
+    await Future.wait([
+      _loadRequestedItems(),
+      _loadNotificationCount(),
+    ]);
+    await _loadItems();
+    
+    _startNotificationTimer();
+  } else {
+    if (mounted) {
       setState(() {
-        currentUserId = user['id'];
-        currentUserName = user['full_name'];
-        currentUserPhone = user['phone'];
+        isLoading = false;
+        errorMessage = 'Please login to continue';
       });
-      
-      await Future.wait([
-        _loadRequestedItems(),
-        _loadNotificationCount(),
-      ]);
-      await _loadItems();
-      
-      _startNotificationTimer();
-    } else {
-      if (mounted) {
-        setState(() {
-          isLoading = false;
-          errorMessage = 'Please login to continue';
-        });
-      }
     }
   }
+}
+
 bool _isItemFounder(dynamic item) {
-  if (item['user_id'] != null) {
-    try {
-      int itemUserId;
-      if (item['user_id'] is String) {
-        itemUserId = int.tryParse(item['user_id']) ?? 0;
-      } else {
-        itemUserId = item['user_id'] as int;
-      }
-      
-      if (itemUserId > 0 && itemUserId == currentUserId) {
-        return true;
-      }
-    } catch (e) {
-      // 
+  if (currentUserStringId == null || currentUserStringId!.isEmpty) {
+    return false;
+  }
+  if (item['user_string_id'] != null) {
+    String itemUserStringId = item['user_string_id'].toString();
+    if (itemUserStringId == currentUserStringId) {
+      return true;
     }
   }
   
@@ -101,20 +96,8 @@ bool _isItemFounder(dynamic item) {
       itemReporterName == currentName) {
     return true;
   }
-  
-  if (item['reporter_phone'] != null && currentUserPhone != null) {
-    String itemPhone = item['reporter_phone'].toString().trim();
-    String currentPhone = currentUserPhone!.trim();
-    
-    if (itemPhone.isNotEmpty && 
-        itemPhone != 'hidden' && 
-        itemPhone == currentPhone) {
-      return true;
-    }
-  }
   return false;
 }
-  
   void _startNotificationTimer() {
     _notificationTimer?.cancel();
     _notificationTimer = Timer.periodic(const Duration(seconds: 30), (_) {
@@ -124,57 +107,55 @@ bool _isItemFounder(dynamic item) {
     });
   }
 
-  Future<void> _loadNotificationCount() async {
-    if (currentUserId == null || !mounted) return;
+Future<void> _loadNotificationCount() async {
+  if (currentUserStringId == null || !mounted) return;
+  
+  try {
+    final result = await NotificationService.getNotifications(
+      userId: currentUserStringId!,
+    );
     
-    try {
-      final result = await NotificationService.getNotifications(
-        userId: currentUserId!,
-      );
-      
-      if (result['success'] == true && mounted) {
-        setState(() {
-          _notificationCount = result['unread_count'] ?? 0;
-        });
-      }
-    } catch (e) {
-      // 
+    if (result['success'] == true && mounted) {
+      setState(() {
+        _notificationCount = result['unread_count'] ?? 0;
+      });
     }
+  } catch (e) {
+    // 
   }
-
-  Future<void> _loadRequestedItems() async {
-    if (currentUserId == null || !mounted) return;
+}
+Future<void> _loadRequestedItems() async {
+  if (currentUserStringId == null || !mounted) return;
+  
+  try {
+    final result = await ApiService.getUserRequests(userStringId: currentUserStringId!); 
     
-    try {
-      final result = await ApiService.getUserRequests(userId: currentUserId!);
-      
-      if (result['success'] == true && result['requests'] != null && mounted) {
-        setState(() {
-          requestedItems.clear();
-          approvedItems.clear();
-          requestStatus.clear();
+    if (result['success'] == true && result['requests'] != null && mounted) {
+      setState(() {
+        requestedItems.clear();
+        approvedItems.clear();
+        requestStatus.clear();
+        
+        for (var req in result['requests']) {
+          int itemId = req['item_id'] is String 
+              ? int.parse(req['item_id']) 
+              : req['item_id'];
+          String status = req['status'] ?? 'pending';
           
-          for (var req in result['requests']) {
-            int itemId = req['item_id'] is String 
-                ? int.parse(req['item_id']) 
-                : req['item_id'];
-            String status = req['status'] ?? 'pending';
-            
-            requestStatus[itemId] = status;
-            
-            if (status == 'approved') {
-              approvedItems.add(itemId);
-            } else if (status == 'pending') {
-              requestedItems.add(itemId);
-            }
+          requestStatus[itemId] = status;
+          
+          if (status == 'approved') {
+            approvedItems.add(itemId);
+          } else if (status == 'pending') {
+            requestedItems.add(itemId);
           }
-        });
-      }
-    } catch (e) {
-      // 
+        }
+      });
     }
+  } catch (e) {
+    // 
   }
-
+}
 Future<void> _loadItems() async {
   if (!mounted) return;
   
@@ -184,9 +165,8 @@ Future<void> _loadItems() async {
   });
 
   try {
-    final lostResult = await ApiService.getItems(type: 'lost');
-    final foundResult = await ApiService.getFoundItems(userId: currentUserId);
-
+    final lostResult = await ApiService.getLostItems();
+    final foundResult = await ApiService.getFoundItems(userStringId: currentUserStringId);
     if (mounted) {
       setState(() {
         isLoading = false;
@@ -197,7 +177,6 @@ Future<void> _loadItems() async {
 
         if (foundResult['success'] == true) {
           foundItems = foundResult['items'] ?? [];
-          
           approvedItems.clear();
           requestedItems.clear();
           requestStatus.clear();
@@ -210,8 +189,6 @@ Future<void> _loadItems() async {
             if (isFounder) {
               approvedItems.add(itemId);
               requestStatus[itemId] = 'approved';
-              item['is_restricted'] = false;
-              item['access_level'] = 'accessible';
             } else {
               String accessLevel = item['access_level'] ?? 'restricted';
               
@@ -231,7 +208,7 @@ Future<void> _loadItems() async {
     if (mounted) {
       setState(() {
         isLoading = false;
-        errorMessage = 'Failed to load items!';
+        errorMessage = 'Failed to load items: $e';
       });
     }
   }
@@ -344,6 +321,7 @@ Future<void> _loadItems() async {
       ),
     );
   }
+  
   Widget _buildLostItemsList() {
     if (lostItems.isEmpty) {
       return Center(
@@ -370,6 +348,7 @@ Future<void> _loadItems() async {
       ),
     );
   }
+
 Widget _buildLostItemCard(dynamic item) {
   final bool isFounder = _isItemFounder(item);
   
@@ -488,83 +467,84 @@ Widget _buildLostItemCard(dynamic item) {
   );
 }
 
-  void _showLostItemDetails(dynamic item) {
-    final TextEditingController messageController = TextEditingController();
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.9,
-        minChildSize: 0.5,
-        maxChildSize: 0.95,
-        expand: false,
-        builder: (context, scrollController) {
-          return Container(
-            padding: const EdgeInsets.all(20),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.grey[300],
-                      borderRadius: BorderRadius.circular(2),
+void _showLostItemDetails(dynamic item) {
+  // Don't create TextEditingController here anymore
+  
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (context) => DraggableScrollableSheet(
+      initialChildSize: 0.9,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (context, scrollController) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              
+              if (item['image_path'] != null)
+                Container(
+                  height: 200,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.network(
+                      _getImageUrl(item['image_path']),
+                      fit: BoxFit.cover,
+                      width: double.infinity,
+                      height: 200,
                     ),
                   ),
                 ),
-                const SizedBox(height: 20),
-                
-                if (item['image_path'] != null)
+              
+              const SizedBox(height: 16),
+              
+              Row(
+                children: [
                   Container(
-                    height: 200,
-                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
+                      color: Colors.red.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(20),
                     ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Image.network(
-                        _getImageUrl(item['image_path']),
-                        fit: BoxFit.cover,
-                        width: double.infinity,
-                        height: 200,
-                      ),
-                    ),
+                    child: const Text('LOST ITEM', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
                   ),
-                
-                const SizedBox(height: 16),
-                
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: const Text('LOST ITEM', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-                    ),
-                  ],
-                ),
-                
-                const SizedBox(height: 8),
-                
-                Text(
-                  item['title'] ?? 'No title',
-                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                ),
-                
-                const SizedBox(height: 16),
+                ],
+              ),
+              
+              const SizedBox(height: 8),
+              
+              Text(
+                item['title'] ?? 'No title',
+                style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              ),
+              
+              const SizedBox(height: 16),
+              
               if (_isItemFounder(item))
                 Container(
                   margin: const EdgeInsets.only(top: 8),
@@ -590,17 +570,20 @@ Widget _buildLostItemCard(dynamic item) {
                     ],
                   ),
                 ),
-                  Expanded(
-                  child: ListView(
-                    controller: scrollController,
-                    children: [
-                      _buildDetailSection('Description', item['description'] ?? 'No description'),
-                      _buildDetailSection('Location', item['location'] ?? 'Unknown'),
-                      _buildDetailSection('Category', item['category'] ?? 'Other'),
-                      _buildDetailSection('Lost By', '${item['reporter_name']} • ${item['reporter_phone']}'),
-                      _buildDetailSection('Date Lost', _formatDate(item['created_at'])),
-                      
-                      const SizedBox(height: 20),
+              
+              Expanded(
+                child: ListView(
+                  controller: scrollController,
+                  children: [
+                    _buildDetailSection('Description', item['description'] ?? 'No description'),
+                    _buildDetailSection('Location', item['location'] ?? 'Unknown'),
+                    _buildDetailSection('Category', item['category'] ?? 'Other'),
+                    _buildDetailSection('Lost By', '${item['reporter_name']} • ${item['reporter_phone']}'),
+                    _buildDetailSection('Date Lost', _formatDate(item['created_at'])),
+                    
+                    const SizedBox(height: 20),
+                    
+                    if (!_isItemFounder(item))
                       Card(
                         color: Colors.green[50],
                         child: Padding(
@@ -615,31 +598,41 @@ Widget _buildLostItemCard(dynamic item) {
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                'Report that you have found this item. Admin will verify and connect you with the owner.',
+                                'Click below to report that you found this item. '
+                                'You can provide photos and details to help verify ownership.',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(color: Colors.grey[600], fontSize: 13),
                               ),
                               const SizedBox(height: 16),
-                              TextField(
-                                controller: messageController,
-                                maxLines: 3,
-                                decoration: const InputDecoration(
-                                  hintText: 'Tell us where and when you found it...',
-                                  border: OutlineInputBorder(),
-                                ),
-                              ),
-                              const SizedBox(height: 12),
                               SizedBox(
                                 width: double.infinity,
                                 child: ElevatedButton.icon(
                                   onPressed: () {
-                                    int itemId = item['id'] is String 
-                                        ? int.parse(item['id']) 
-                                        : item['id'];
-                                    _reportFoundMatch(itemId, messageController.text);
+                                    Navigator.pop(context); // Close bottom sheet
+                                    
+                                    // Navigate to the new report screen
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => ReportFoundMatchScreen(
+                                          lostItemId: item['item_string_id'] ?? item['id'].toString(),
+                                          lostItemTitle: item['title'] ?? 'Unknown Item',
+                                          lostItemImage: item['image_path'] != null 
+                                              ? _getImageUrl(item['image_path']) 
+                                              : null,
+                                          userStringId: currentUserStringId!,
+                                          userName: currentUserName!,
+                                          userPhone: currentUserPhone ?? '',
+                                        ),
+                                      ),
+                                    ).then((reported) {
+                                      if (reported == true) {
+                                        _loadItems(); // Refresh items if report was successful
+                                      }
+                                    });
                                   },
-                                  icon: const Icon(Icons.check_circle),
-                                  label: const Text('I Found This Item'),
+                                  icon: const Icon(Icons.navigate_next),
+                                  label: const Text('Continue to Report Form'),
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: Colors.green,
                                     foregroundColor: Colors.white,
@@ -651,17 +644,16 @@ Widget _buildLostItemCard(dynamic item) {
                           ),
                         ),
                       ),
-                    ],
-                  ),
+                  ],
                 ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
+              ),
+            ],
+          ),
+        );
+      },
+    ),
+  );
+}
   Widget _buildFoundItemsList() {
     if (foundItems.isEmpty) {
       return Center(
@@ -991,7 +983,7 @@ Widget _buildFoundItemCard(dynamic item) {
   );
 }
  
-  void _showRequestAccessDialog(dynamic item) {
+void _showRequestAccessDialog(dynamic item) {
     final TextEditingController messageController = TextEditingController();
     final _formKey = GlobalKey<FormState>();
 
@@ -1087,72 +1079,71 @@ Widget _buildFoundItemCard(dynamic item) {
       ),
     );
   }
-  Future<void> _submitAccessRequest(int itemId, String message) async {
-    if (message.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please provide details about your item'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
 
-    if (currentUserId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('You must be logged in'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    setState(() => isLoading = true);
-
-    try {
-      
-      final result = await ApiService.requestItemAccess(
-        userId: currentUserId!,
-        itemId: itemId,
-        message: message,
-      );
-
-
-      if (result['success'] == true) {
-        setState(() {
-          requestedItems.add(itemId);
-          requestStatus[itemId] = 'pending';
-        });
-        
-        _showSuccessDialog(
-          'Claim submitted successfully!', 
-          'Admin will review your request. You will be notified once approved.'
-        );
-        
-        _loadItems();
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(result['message'] ?? 'Failed to submit claim'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    } finally {
-      setState(() => isLoading = false);
-    }
+Future<void> _submitAccessRequest(int itemId, String message) async {
+  if (message.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Please provide details about your item'),
+        backgroundColor: Colors.orange,
+      ),
+    );
+    return;
   }
 
-  void _showFoundItemDetails(dynamic item) {
+  if (currentUserStringId == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('You must be logged in'),
+        backgroundColor: Colors.red,
+      ),
+    );
+    return;
+  }
+
+  setState(() => isLoading = true);
+
+  try {
+    final result = await ApiService.requestItemAccess(
+      userStringId: currentUserStringId!, 
+      itemId: itemId,
+      message: message,
+    );
+
+    if (result['success'] == true) {
+      setState(() {
+        requestedItems.add(itemId);
+        requestStatus[itemId] = 'pending';
+      });
+      
+      _showSuccessDialog(
+        'Claim submitted successfully!', 
+        'Admin will review your request. You will be notified once approved.'
+      );
+      
+      _loadItems();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result['message'] ?? 'Failed to submit claim'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Error: ${e.toString()}'),
+        backgroundColor: Colors.red,
+      ),
+    );
+  } finally {
+    setState(() => isLoading = false);
+  }
+}
+
+void _showFoundItemDetails(dynamic item) {
     
     showModalBottomSheet(
       context: context,
@@ -1364,6 +1355,8 @@ if (_isItemFounder(item))
       ),
     );
   }
+ 
+ 
   void _showPendingDialog() {
     showDialog(
       context: context,
@@ -1480,70 +1473,79 @@ if (_isItemFounder(item))
       ),
     );
   }
-  Future<void> _reportFoundMatch(int lostItemId, String message) async {
-    if (message.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please describe where and when you found it'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
 
-    if (currentUserName == null || currentUserName!.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Your name is missing. Please login again.'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
 
-    setState(() => isLoading = true);
+Future<void> _reportFoundMatch(String lostItemStringId, String message , currentUserStringId) async {
+  if (message.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Please describe where and when you found it'),
+        backgroundColor: Colors.orange,
+      ),
+    );
+    return;
+  }
 
-    try {
-      final result = await ApiService.reportFoundMatch(
-        lostItemId: lostItemId,
-        finderName: currentUserName!,
-        finderPhone: currentUserPhone ?? '',
-        finderMessage: message,
-        userId: currentUserId,
-      );
+  if (currentUserName == null || currentUserName!.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Your name is missing. Please login again.'),
+        backgroundColor: Colors.red,
+      ),
+    );
+    return;
+  }
 
-      if (result['success'] == true) {
-        Navigator.pop(context); 
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(result['message'] ?? 'Report submitted successfully!'),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 4),
-          ),
-        );
-        
-        _loadItems();
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(result['message'] ?? 'Failed to submit report'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } catch (e) {
+  setState(() => isLoading = true);
+
+  try {
+    print('📤 Reporting found match for lost item: $lostItemStringId');
+    
+    final result = await ApiService.reportFoundMatch(
+      lostItemStringId: lostItemStringId, 
+      finderName: currentUserName!,
+      finderPhone: currentUserPhone ?? '',
+      finderMessage: message,
+      userStringId: currentUserStringId.toString(),
+    );
+
+    print('📥 Result: $result');
+
+    if (result['success'] == true) {
+      Navigator.pop(context); 
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error: ${e.toString()}'),
+          content: Text(result['message'] ?? 'Report submitted successfully!'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+      
+      _loadItems();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result['message'] ?? 'Failed to submit report'),
           backgroundColor: Colors.red,
         ),
       );
-    } finally {
-      setState(() => isLoading = false);
     }
+  } catch (e) {
+    print('❌ Error: $e');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Error: ${e.toString()}'),
+        backgroundColor: Colors.red,
+      ),
+    );
+  } finally {
+    setState(() => isLoading = false);
   }
-  Widget _buildDetailSection(String title, String content) {
+}
+  
+  
+Widget _buildDetailSection(String title, String content) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Column(
@@ -1568,7 +1570,9 @@ if (_isItemFounder(item))
       ),
     );
   }
-  String _formatDate(String? dateString) {
+
+
+String _formatDate(String? dateString) {
     if (dateString == null) return 'Unknown';
     try {
       final date = DateTime.parse(dateString);
@@ -1577,7 +1581,8 @@ if (_isItemFounder(item))
       return dateString;
     }
   }
-  Widget _buildErrorView() {
+  
+Widget _buildErrorView() {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,

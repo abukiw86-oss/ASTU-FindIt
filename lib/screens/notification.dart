@@ -12,7 +12,7 @@ class NotificationsScreen extends StatefulWidget {
 class _NotificationsScreenState extends State<NotificationsScreen> {
   List<dynamic> _notifications = [];
   bool _isLoading = true;
-  int? _currentUserId;
+  String? _currentUserId;
   int _unreadCount = 0;
 
   @override
@@ -25,7 +25,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final user = await AuthService.getUser();
     if (user != null) {
       setState(() {
-        _currentUserId = user['id'];
+        _currentUserId = user['user_string_id'];
       });
       _loadNotifications();
     }

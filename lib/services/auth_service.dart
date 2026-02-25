@@ -4,28 +4,34 @@ import 'package:shared_preferences/shared_preferences.dart';
 class AuthService {
   static const String _keyUser = 'user_data';
   static const String _keyIsLoggedIn = 'is_logged_in';
-  
-  static Future<void> saveUser({
-    required dynamic id,
-    required String email,
-    required String fullName,
-    required String? phone,
-    required String role,
-  }) async {
-    final prefs = await SharedPreferences.getInstance();
+ 
+// In auth_service.dart
+static Future<void> saveUser({
+  required String userStringId,
+  required String email,
+  required String fullName,
+  required String? phone,
+  required String role,
+}) async {
+  final prefs = await SharedPreferences.getInstance();
 
-    final userMap = {
-      'id': id,
-      'email': email,
-      'full_name': fullName,
-      'phone': phone,
-      'role': role,
-    };
 
-    await prefs.setString(_keyUser, jsonEncode(userMap));
-    await prefs.setBool(_keyIsLoggedIn, true);
-  }
+  final userMap = {
+    'user_string_id': userStringId, 
+    'email': email,
+    'full_name': fullName,
+    'phone': phone,
+    'role': role,
+  };
 
+  await prefs.setString(_keyUser, jsonEncode(userMap));
+  await prefs.setBool(_keyIsLoggedIn, true);
+}
+// Add getter for string ID
+static Future<String?> getUserStringId() async {
+  final user = await getUser();
+  return user?['user_string_id'] as String?;
+}
   static Future<Map<String, dynamic>?> getUser() async {
     final prefs = await SharedPreferences.getInstance();
     final userJson = prefs.getString(_keyUser);
