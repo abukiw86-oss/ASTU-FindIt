@@ -32,6 +32,11 @@ static Future<String?> getUserStringId() async {
   final user = await getUser();
   return user?['user_string_id'] as String?;
 }
+
+static Future<String?> getUserphone() async {
+  final user = await getUser();
+  return user?['phone'] as String?;
+}
   static Future<Map<String, dynamic>?> getUser() async {
     final prefs = await SharedPreferences.getInstance();
     final userJson = prefs.getString(_keyUser);

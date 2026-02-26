@@ -3,6 +3,8 @@ import 'package:http/http.dart' as http;
 import 'dart:io';
 import '../services/auth_service.dart';
 import 'package:http_parser/http_parser.dart';
+import 'package:path/path.dart' as path; 
+
 
 class ApiService {
   static const String baseUrl = "https://astufindit.x10.mx/index/api.php"; 
@@ -122,28 +124,27 @@ static Future<Map<String, dynamic>> login({
       return {'success': false, 'message': 'Network error: $e'};
     }
   }
-
-static Future<Map<String, dynamic>> reportItem({
+// works
+static Future<Map<String, dynamic>> reportlostItem({
   required String type,
   required String title,
   required String description,
   String? location,
   String? category,
-  File? imageFile,
+  List<File>? imageFiles,
   required String reporterName,
   required String reporterPhone,
-  String? userStringId, 
+  String? userStringId,
 }) async {
   try {
+    print("Starting lost/found item report request");
+
     String finalType = type.trim().toLowerCase();
-    if (finalType.isEmpty) {
+    if (finalType.isEmpty || (finalType != 'lost' && finalType != 'found')) {
       finalType = 'lost';
     }
-    
-    if (finalType != 'lost' && finalType != 'found') {
-      finalType = 'lost';
-    }
-    
+
+    // Basic client-side validations
     if (title.trim().isEmpty) {
       return {'success': false, 'message': 'Title is required'};
     }
@@ -156,115 +157,118 @@ static Future<Map<String, dynamic>> reportItem({
     if (reporterPhone.trim().isEmpty) {
       return {'success': false, 'message': 'Reporter phone is required'};
     }
-    
-    if (finalType == 'found' && imageFile == null) {
-      return {'success': false, 'message': 'Image is required for found items'};
+
+    // For found items → require at least one image
+    if (finalType == 'found' && (imageFiles == null || imageFiles.isEmpty)) {
+      return {'success': false, 'message': 'At least one image is required for found items'};
     }
+
     var request = http.MultipartRequest(
       'POST',
-      Uri.parse('$baseUrl?action=report-item'),
+      Uri.parse('$baseUrl?action=report-lost-item'),
     );
 
-    request.headers.addAll({
-      'Accept': 'application/json',
+    request.headers['Accept'] = 'application/json';
+
+    // Text fields
+    request.fields.addAll({
+      'type': finalType,
+      'title': title.trim(),
+      'description': description.trim(),
+      'location': location?.trim() ?? '',
+      'category': category?.trim() ?? 'other',
+      'reporter_name': reporterName.trim(),
+      'reporter_phone': reporterPhone.trim(),
     });
 
-    request.fields['type'] = finalType; 
-    request.fields['title'] = title;
-    request.fields['description'] = description;
-    request.fields['location'] = location ?? '';
-    request.fields['category'] = category ?? 'other';
-    request.fields['reporter_name'] = reporterName;
-    request.fields['reporter_phone'] = reporterPhone;
-    
     if (userStringId != null && userStringId.isNotEmpty) {
       request.fields['user_string_id'] = userStringId;
     }
 
-    // Add image if provided
-    if (imageFile != null) {
-      if (await imageFile.exists()) {
-        // Check file size (max 5MB)
-        final fileSize = await imageFile.length();
-        if (fileSize > 5 * 1024 * 1024) {
-          return {
-            'success': false,
-            'message': 'Image too large. Maximum size is 5MB.',
-          };
+    // ── Add multiple images ───────────────────────────────────────────────
+    if (imageFiles != null && imageFiles.isNotEmpty) {
+      for (var file in imageFiles) {
+        if (!await file.exists()) {
+          print('File does not exist: ${file.path}');
+          continue;
         }
-        
-        var stream = http.ByteStream(imageFile.openRead());
-        var length = await imageFile.length();
-        
+
+        final fileSize = await file.length();
+        if (fileSize > 5 * 1024 * 1024) {
+          print('Skipping large file: ${file.path} (${(fileSize / 1024 / 1024).toStringAsFixed(1)} MB)');
+          continue;
+        }
+
         var multipartFile = http.MultipartFile(
-          'image',
-          stream,
-          length,
-          filename: imageFile.path.split('/').last,
+          'image[]',  // ← IMPORTANT: use 'image' (no [])
+          http.ByteStream(file.openRead()),
+          fileSize,
+          filename: path.basename(file.path),
         );
+
         request.files.add(multipartFile);
-      } 
+        print('Attached image: ${path.basename(file.path)} (${(fileSize / 1024).toStringAsFixed(0)} KB)');
+      }
     }
 
-    // Send request with timeout
+    print("Sending request with ${request.files.length} image(s)");
+
     var streamedResponse = await request.send().timeout(
-      const Duration(seconds: 30),
-      onTimeout: () {
-        throw Exception('Connection timeout. Please check your internet.');
-      },
+      const Duration(seconds: 60),
+      onTimeout: () => throw Exception('Upload timeout - check connection'),
     );
-    
+
     var response = await http.Response.fromStream(streamedResponse);
-    
+
+    print('Response status: ${response.statusCode}');
+    print('Response body (first 500 chars): ${response.body.substring(0, response.body.length.clamp(0, 5000))}');
+
     if (response.body.trim().isEmpty) {
       return {'success': false, 'message': 'Empty response from server'};
     }
-    
-    // Check if response starts with HTML (error)
+
     if (response.body.trim().startsWith('<')) {
       return {
-        'success': false, 
-        'message': 'Server error. Please check server logs.'
+        'success': false,
+        'message': 'Server returned HTML (possible PHP error or misconfiguration)',
       };
     }
-    
+
     Map<String, dynamic> data;
     try {
       data = jsonDecode(response.body);
     } catch (e) {
       return {
         'success': false,
-        'message': 'Invalid server response format',
+        'message': 'Invalid JSON response from server',
       };
     }
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return {
         'success': true,
-        'message': data['message'] ?? 'Reported successfully',
+        'message': data['message'] ?? 'Item reported successfully',
         'id': data['id'],
-        'item_string_id': data['item_string_id'], // Add this if your API returns it
+        'item_string_id': data['item_string_id'],
+        'uploaded_images': data['uploaded_images'] ?? 0,
       };
     } else {
       return {
         'success': false,
-        'message': data['message'] ?? data['error'] ?? 'Failed to report (${response.statusCode})',
+        'message': data['message'] ?? 'Server error (${response.statusCode})',
       };
     }
-    
-  } on SocketException {
+  } catch (e, stack) {
+    print('Error in reportlostItem: $e');
+    print('Stack trace: $stack');
     return {
-      'success': false, 
-      'message': 'No internet connection. Please check your network.'
+      'success': false,
+      'message': 'Request failed: ${e.toString()}',
     };
-  } on HttpException {
-    return {
-      'success': false, 
-      'message': 'Server connection failed. Please try again.'
-    };
-  } 
+  }
 }
-  static Future<Map<String, dynamic>> getLostItems() async {
+// works
+static Future<Map<String, dynamic>> getLostItems() async {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl?action=get-lost-items'),
@@ -292,7 +296,7 @@ static Future<Map<String, dynamic>> reportItem({
     }
   }
 
-  static Future<Map<String, dynamic>> requestItem({
+static Future<Map<String, dynamic>> requestItem({
     required String userStringId, 
     required int itemId,
     required String message,
@@ -315,7 +319,7 @@ static Future<Map<String, dynamic>> reportItem({
     }
   }
 
-  static Future<Map<String, dynamic>> getFoundItems({String? userStringId}) async {
+static Future<Map<String, dynamic>> getFoundItems({String? userStringId}) async {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl?action=get-found-items${userStringId != null ? '&user_string_id=$userStringId' : ''}'),
@@ -326,7 +330,7 @@ static Future<Map<String, dynamic>> reportItem({
     }
   }
 
-  static Future<Map<String, dynamic>> getUserRequests({required String userStringId}) async {
+static Future<Map<String, dynamic>> getUserRequests({required String userStringId}) async {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl?action=get-user-requests&user_string_id=$userStringId'),
@@ -646,6 +650,7 @@ static Future<Map<String, dynamic>> requestItemAccess({
     };
   }
 }
+
 static Future<Map<String, dynamic>> getItemByStringId(String itemStringId) async {
   try {
     final response = await http.get(
@@ -682,69 +687,91 @@ static Future<Map<String, dynamic>> reportFoundMatch({
   required String finderName,
   required String finderPhone,
   required String finderMessage,
-  String? userStringId,
-  File? imageFile, // Add this parameter
+ required String userStringId,
+ required List<File>? imageFiles,         
 }) async {
   try {
     print('📤 Reporting found match for lost item: $lostItemStringId');
-    
+    print(userStringId);
+    print('   Images to upload: ${imageFiles?.length ?? 0}');
+
     var request = http.MultipartRequest(
       'POST',
       Uri.parse('$baseUrl?action=report-found-match'),
     );
 
-    // Add text fields
+    // ── Text fields ────────────────────────────────────────
     request.fields['lost_item_string_id'] = lostItemStringId;
-    request.fields['finder_name'] = finderName;
-    request.fields['finder_phone'] = finderPhone;
-    request.fields['finder_message'] = finderMessage;
-    
-    if (userStringId != null) {
-      request.fields['user_string_id'] = userStringId;
-    }
+    request.fields['finder_name']         = finderName;
+    request.fields['finder_phone']        = finderPhone;
+    request.fields['finder_message']      = finderMessage;
+    request.fields['user_string_id']      =  userStringId ;
+    // ── Multiple images ────────────────────────────────────
+    if (imageFiles != null && imageFiles.isNotEmpty) {
+      for (var i = 0; i < imageFiles.length; i++) {
+        final file = imageFiles[i];
 
-    // Add image if provided
-    if (imageFile != null) {
-      if (await imageFile.exists()) {
-        var stream = http.ByteStream(imageFile.openRead());
-        var length = await imageFile.length();
-        
-        var multipartFile = http.MultipartFile(
-          'image',
-          stream,
-          length,
-          filename: imageFile.path.split('/').last,
-        );
-        request.files.add(multipartFile);
-        print('📸 Image added: ${imageFile.path}');
+        if (await file.exists()) {
+          final length = await file.length();
+          final filename = file.path.split(Platform.pathSeparator).last;
+
+          if (length > 8 * 1024 * 1024) { 
+            print('⚠️ Skipping large file: $filename (${(length / 1024 / 1024).toStringAsFixed(1)} MB)');
+            continue;
+          }
+
+          var stream = http.ByteStream(file.openRead());
+
+          var multipartFile = http.MultipartFile(
+            'image[]',          
+            stream,
+            length,
+            filename: filename,
+          );
+
+          request.files.add(multipartFile);
+          print('📸 Added image ${i + 1}/${imageFiles.length}: $filename (${(length / 1024).toStringAsFixed(0)} KB)');
+        } else {
+          print('⚠️ File not found: ${file.path}');
+        }
       }
     }
 
+    // ── Send request ───────────────────────────────────────
     var streamedResponse = await request.send().timeout(
-      const Duration(seconds: 30),
-      onTimeout: () => throw Exception('Connection timeout'),
+      const Duration(seconds: 45),   // ← increased a bit because multiple images take longer
+      onTimeout: () => throw Exception('Upload timeout'),
     );
-    
+
     var response = await http.Response.fromStream(streamedResponse);
-    
+
     print('📥 Response status: ${response.statusCode}');
-    print('📥 Response body: ${response.body}');
-    
+    print('📥 Response body: ${response.body.substring(0, response.body.length.clamp(0, 5000))}...');
+
     if (response.body.trim().isEmpty) {
       return {'success': false, 'message': 'Empty response from server'};
     }
-    
-    final Map<String, dynamic> data = jsonDecode(response.body);
-    return data;
-    
-  } catch (e) {
+
+    try {
+      final Map<String, dynamic> data = jsonDecode(response.body);
+      return data;
+    } catch (jsonErr) {
+      return {
+        'success': false,
+        'message': 'Invalid JSON response: ${response.body}',
+      };
+    }
+
+  } catch (e, stack) {
     print('❌ Error in reportFoundMatch: $e');
+    print('Stack trace: $stack');
     return {
-      'success': false, 
-      'message': 'Network error: ${e.toString()}'
+      'success': false,
+      'message': 'Network/upload error: ${e.toString()}',
     };
   }
 }
+
 static Future<Map<String, dynamic>> getItemDetails({required String itemStringId}) async {
   try {
     final response = await http.get(

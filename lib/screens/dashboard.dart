@@ -1,13 +1,16 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import '../services/api_service.dart';
 import '../services/notification_service.dart';
 import 'add_lost_found.dart';
 import '../services/auth_service.dart';
-import 'report_individual.dart';
+import '../widget/appbar.dart';
 import 'notification.dart';
 import 'profile.dart';
+import '../widget/full_screen_image_viewer.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -86,19 +89,10 @@ bool _isItemFounder(dynamic item) {
     if (itemUserStringId == currentUserStringId) {
       return true;
     }
-  }
-  
-  String itemReporterName = (item['reporter_name'] ?? '').toString().trim().toLowerCase();
-  String currentName = (currentUserName ?? '').trim().toLowerCase();
-  
-  if (itemReporterName.isNotEmpty && 
-      itemReporterName != 'hidden' && 
-      itemReporterName == currentName) {
-    return true;
-  }
+}
   return false;
 }
-  void _startNotificationTimer() {
+void _startNotificationTimer() {
     _notificationTimer?.cancel();
     _notificationTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (currentUserId != null && mounted) {
@@ -156,6 +150,7 @@ Future<void> _loadRequestedItems() async {
     // 
   }
 }
+
 Future<void> _loadItems() async {
   if (!mounted) return;
   
@@ -214,41 +209,117 @@ Future<void> _loadItems() async {
   }
 }
   @override
-  Widget build(BuildContext context) {
+Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: FutureBuilder<String?>(
-          future: AuthService.getUserName(),
-          builder: (context, snapshot) {
-            if (!mounted) return const SizedBox.shrink();
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Lost & Found',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.normal),
+      appBar: LostFoundAppBar(
+        tabController: _tabController,
+        onRefresh: _loadItems,
+        showTabs: true,
+      ),
+      body: isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : errorMessage != null
+              ? _buildErrorView()
+              : TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _buildLostItemsList(),
+                    _buildFoundItemsList(),
+                  ],
                 ),
-                Text(
-                  'Welcome, ${snapshot.data ?? 'User'}',
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w300),
-                ),
-              ],
-            );
-          },
-        ),
-        actions: [
-          Stack(
+                bottomNavigationBar: Container(
+  height: 96,
+  decoration: BoxDecoration(
+    color: Theme.of(context).colorScheme.surface,
+    borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+    boxShadow: [
+      BoxShadow(
+        color: Colors.black.withOpacity(0.08),
+        blurRadius: 16,
+        offset: const Offset(0, -4),
+      )
+    ],
+  ),
+  child: Row(
+    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+    crossAxisAlignment: CrossAxisAlignment.center,
+    children: [
+      // Left icons
+      IconButton(
+        iconSize: 28,
+        icon: const Icon(Icons.home_outlined),
+        onPressed: () {/* home */},
+      ),
+      IconButton(
+        iconSize: 28,
+        icon: const Icon(Icons.list_alt_outlined),
+        onPressed: () {/* my items */},
+      ),
+
+      // Big central action area
+      Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              IconButton(
-                icon: const Icon(Icons.notifications),
-                onPressed: () {
-                  Navigator.push(
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.red[700],
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                ),
+                icon: const Icon(Icons.search_off_rounded, size: 20),
+                label: const Text('Lost', style: TextStyle(fontWeight: FontWeight.bold)),
+                onPressed:(){ Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const ReportItemOrMatchScreen(initialType: 'lost'),
+                  ),
+                );
+                }
+              ),
+              const SizedBox(width: 12),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.green[700],
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                ),
+                icon: const Icon(Icons.check_circle_outline_rounded, size: 20),
+                label: const Text('Found', style: TextStyle(fontWeight: FontWeight.bold)),
+                onPressed:(){ Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const ReportItemOrMatchScreen(initialType: 'found'),
+                  ),
+                );
+                }
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            "Report Item",
+            style: TextStyle(
+              fontSize: 11,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+
+      IconButton(
+        iconSize: 28,
+        icon: const Icon(Icons.notifications_outlined),
+        onPressed: () {
+          Navigator.push(
                     context,
                     MaterialPageRoute(builder: (_) => const NotificationsScreen()),
                   ).then((_) => _loadNotificationCount());
-                },
-              ),
-              if (_notificationCount > 0)
+                  },
+      ),
+            if (_notificationCount > 0)
                 Positioned(
                   right: 8,
                   top: 8,
@@ -272,57 +343,25 @@ Future<void> _loadItems() async {
                     ),
                   ),
                 ),
-            ],
-          ),
-          
-          IconButton(
-            icon: const Icon(Icons.person),
-            onPressed: () {
-              Navigator.push(
+           
+      IconButton(
+        iconSize: 28,
+        icon: const Icon(Icons.person_outline),
+        onPressed: () {              
+          Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const ProfileScreen()),
-              );
-            },
-          ),
-          
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadItems,
-          ),
-        ],
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Lost Items', icon: Icon(Icons.search_off)),
-            Tab(text: 'Found Items', icon: Icon(Icons.check_circle)),
-          ],
-        ),
+              );},
       ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : errorMessage != null
-              ? _buildErrorView()
-              : TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _buildLostItemsList(),
-                    _buildFoundItemsList(),
-                  ],
-                ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const ReportItemScreen()),
-          ).then((_) => _loadItems());
-        },
-        icon: const Icon(Icons.add),
-        label: const Text('Report Item'),
-      ),
+    ],
+  ),
+),
+   
     );
   }
-  
-  Widget _buildLostItemsList() {
+
+// widgets and some useful helpers
+Widget _buildLostItemsList() {
     if (lostItems.isEmpty) {
       return Center(
         child: Column(
@@ -351,7 +390,28 @@ Future<void> _loadItems() async {
 
 Widget _buildLostItemCard(dynamic item) {
   final bool isFounder = _isItemFounder(item);
-  
+
+  // ── Parse the first image from pipe-separated image_path ─────────────────
+  String? firstImageUrl;
+
+  var rawImagePath = item['image_path']?.toString()?.trim();
+
+  if (rawImagePath != null && rawImagePath != 'NULL' && rawImagePath.isNotEmpty) {
+    // Remove wrapping single quotes if present (from DB)
+    if (rawImagePath.startsWith("'") && rawImagePath.endsWith("'")) {
+      rawImagePath = rawImagePath.substring(1, rawImagePath.length - 1).trim();
+    }
+
+    // Split by pipe and take the first valid path
+    final paths = rawImagePath.split('|');
+    if (paths.isNotEmpty) {
+      final firstPath = paths.first.trim();
+      if (firstPath.isNotEmpty) {
+        firstImageUrl = _getImageUrl(firstPath);
+      }
+    }
+  }
+
   return Card(
     margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
     elevation: 2,
@@ -364,6 +424,7 @@ Widget _buildLostItemCard(dynamic item) {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Image container (first image only)
             Container(
               width: 80,
               height: 80,
@@ -371,20 +432,35 @@ Widget _buildLostItemCard(dynamic item) {
                 color: Colors.red.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: item['image_path'] != null
+              child: firstImageUrl != null
                   ? ClipRRect(
                       borderRadius: BorderRadius.circular(8),
                       child: Image.network(
-                        _getImageUrl(item['image_path']),
+                        firstImageUrl,
                         fit: BoxFit.cover,
                         width: 80,
                         height: 80,
-                        errorBuilder: (_, __, ___) => Icon(Icons.image_not_supported, color: Colors.red),
+                        loadingBuilder: (context, child, loadingProgress) {
+                          if (loadingProgress == null) return child;
+                          return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+                        },
+                        errorBuilder: (context, error, stackTrace) {
+                          return const Icon(
+                            Icons.image_not_supported,
+                            color: Colors.red,
+                            size: 40,
+                          );
+                        },
                       ),
                     )
-                  : Icon(Icons.search_off, color: Colors.red, size: 40),
+                  : const Icon(
+                      Icons.search_off,
+                      color: Colors.red,
+                      size: 40,
+                    ),
             ),
             const SizedBox(width: 12),
+
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -450,11 +526,7 @@ Widget _buildLostItemCard(dynamic item) {
                           style: TextStyle(color: Colors.grey[500], fontSize: 12),
                         ),
                       ),
-                      if (isFounder)
-                        Text(
-                          ' • You reported this',
-                          style: TextStyle(color: Colors.blue[400], fontSize: 10, fontStyle: FontStyle.italic),
-                        ),
+                      if (isFounder) _owner(),
                     ],
                   ),
                 ],
@@ -468,8 +540,6 @@ Widget _buildLostItemCard(dynamic item) {
 }
 
 void _showLostItemDetails(dynamic item) {
-  // Don't create TextEditingController here anymore
-  
   showModalBottomSheet(
     context: context,
     isScrollControlled: true,
@@ -477,11 +547,33 @@ void _showLostItemDetails(dynamic item) {
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
     builder: (context) => DraggableScrollableSheet(
-      initialChildSize: 0.9,
+      initialChildSize: 0.92,
       minChildSize: 0.5,
       maxChildSize: 0.95,
       expand: false,
       builder: (context, scrollController) {
+        // ── Parse pipe-separated image paths ─────────────────────────────────
+        List<String> imageUrls = [];
+
+        var rawPath = item['image_path']?.toString()?.trim();
+
+        if (rawPath != null && rawPath != 'NULL' && rawPath.isNotEmpty) {
+          // Remove wrapping single quotes if present (from DB)
+          if (rawPath.startsWith("'") && rawPath.endsWith("'")) {
+            rawPath = rawPath.substring(1, rawPath.length - 1).trim();
+          }
+
+          // Split by pipe and generate URLs
+          final paths = rawPath.split('|');
+          imageUrls = paths.map<String>((String p) {
+            final cleanPath = p.trim();
+            return _getImageUrl(cleanPath);
+          }).where((url) => url.isNotEmpty).toList();
+        }
+
+        // Page controller for arrows
+        final _pageController = PageController();
+
         return Container(
           padding: const EdgeInsets.all(20),
           decoration: const BoxDecoration(
@@ -491,60 +583,147 @@ void _showLostItemDetails(dynamic item) {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Drag handle
               Center(
                 child: Container(
                   width: 40,
                   height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
                   decoration: BoxDecoration(
                     color: Colors.grey[300],
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
-              
-              if (item['image_path'] != null)
-                Container(
-                  height: 200,
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
+              if (imageUrls.isNotEmpty)
+                Expanded(
+                  flex: 3,
+                  child: Stack(
+                    
+                    children: [
+                  PageView.builder(
+                    controller: _pageController, // if you added arrows earlier
+                    itemCount: imageUrls.length,
+                    itemBuilder: (context, index) {
+                      return GestureDetector(
+                        onTap: () {
+                          // Open full-screen viewer
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => FullScreenImageViewer(
+                                images: imageUrls,
+                                initialIndex: index,
+                              ),
+                            ),
+                          );
+                        },
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: Image.network(
+                            imageUrls[index],
+                            fit: BoxFit.cover,
+                            width: double.infinity,
+                            height: 260,
+                            loadingBuilder: (context, child, loadingProgress) {
+                              if (loadingProgress == null) return child;
+                              return const Center(child: CircularProgressIndicator());
+                            },
+                            errorBuilder: (context, error, stackTrace) {
+                              return Container(
+                                color: Colors.grey[200],
+                                child: const Center(
+                                  child: Icon(Icons.broken_image, size: 60, color: Colors.red),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.network(
-                      _getImageUrl(item['image_path']),
-                      fit: BoxFit.cover,
-                      width: double.infinity,
-                      height: 200,
-                    ),
+                                      
+                      if (imageUrls.length > 1)
+                        Positioned(
+                          bottom: 16,
+                          right: 16,
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.5),
+                              borderRadius: BorderRadius.circular(30),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                // Previous button
+                                IconButton(
+                                  icon: const Icon(Icons.arrow_left, color: Colors.white),
+                                  onPressed: () {
+                                    _pageController.previousPage(
+                                      duration: const Duration(milliseconds: 400),
+                                      curve: Curves.easeInOut,
+                                    );
+                                  },
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.arrow_right, color: Colors.white),
+                                  onPressed: () {
+                                    _pageController.nextPage(
+                                      duration: const Duration(milliseconds: 400),
+                                      curve: Curves.easeInOut,
+                                    );
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                )
+              else
+                Container(
+                  height: 180,
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 20),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[200],
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Center(
+                    child: Icon(Icons.image_not_supported, size: 60, color: Colors.grey),
                   ),
                 ),
-              
-              const SizedBox(height: 16),
-              
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.red.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Text('LOST ITEM', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+
+              const SizedBox(height: 20),
+
+              // Item type badge
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Text(
+                  'LOST ITEM',
+                  style: TextStyle(
+                    color: Colors.red,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
                   ),
-                ],
+                ),
               ),
-              
+
               const SizedBox(height: 8),
-              
+
               Text(
                 item['title'] ?? 'No title',
                 style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               ),
-              
+
               const SizedBox(height: 16),
-              
+
               if (_isItemFounder(item))
                 Container(
                   margin: const EdgeInsets.only(top: 8),
@@ -570,7 +749,7 @@ void _showLostItemDetails(dynamic item) {
                     ],
                   ),
                 ),
-              
+
               Expanded(
                 child: ListView(
                   controller: scrollController,
@@ -578,11 +757,11 @@ void _showLostItemDetails(dynamic item) {
                     _buildDetailSection('Description', item['description'] ?? 'No description'),
                     _buildDetailSection('Location', item['location'] ?? 'Unknown'),
                     _buildDetailSection('Category', item['category'] ?? 'Other'),
-                    _buildDetailSection('Lost By', '${item['reporter_name']} • ${item['reporter_phone']}'),
+                    _buildDetailSection('Lost By', '${item['reporter_name'] ?? 'Unknown'} • ${item['reporter_phone'] ?? '—'}'),
                     _buildDetailSection('Date Lost', _formatDate(item['created_at'])),
-                    
+
                     const SizedBox(height: 20),
-                    
+
                     if (!_isItemFounder(item))
                       Card(
                         color: Colors.green[50],
@@ -608,26 +787,20 @@ void _showLostItemDetails(dynamic item) {
                                 width: double.infinity,
                                 child: ElevatedButton.icon(
                                   onPressed: () {
-                                    Navigator.pop(context); // Close bottom sheet
-                                    
-                                    // Navigate to the new report screen
+                                    Navigator.pop(context);
+
                                     Navigator.push(
                                       context,
                                       MaterialPageRoute(
-                                        builder: (context) => ReportFoundMatchScreen(
+                                        builder: (context) => ReportItemOrMatchScreen(
                                           lostItemId: item['item_string_id'] ?? item['id'].toString(),
                                           lostItemTitle: item['title'] ?? 'Unknown Item',
-                                          lostItemImage: item['image_path'] != null 
-                                              ? _getImageUrl(item['image_path']) 
-                                              : null,
-                                          userStringId: currentUserStringId!,
-                                          userName: currentUserName!,
-                                          userPhone: currentUserPhone ?? '',
+                                          lostItemImage: imageUrls.isNotEmpty ? imageUrls.first : null,
                                         ),
                                       ),
                                     ).then((reported) {
                                       if (reported == true) {
-                                        _loadItems(); // Refresh items if report was successful
+                                        _loadItems();
                                       }
                                     });
                                   },
@@ -654,7 +827,9 @@ void _showLostItemDetails(dynamic item) {
     ),
   );
 }
-  Widget _buildFoundItemsList() {
+
+
+Widget _buildFoundItemsList() {
     if (foundItems.isEmpty) {
       return Center(
         child: Column(
@@ -1080,6 +1255,7 @@ void _showRequestAccessDialog(dynamic item) {
     );
   }
 
+// i will work in this  
 Future<void> _submitAccessRequest(int itemId, String message) async {
   if (message.isEmpty) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -1142,6 +1318,7 @@ Future<void> _submitAccessRequest(int itemId, String message) async {
     setState(() => isLoading = false);
   }
 }
+
 
 void _showFoundItemDetails(dynamic item) {
     
@@ -1227,61 +1404,15 @@ void _showFoundItemDetails(dynamic item) {
                 ),
 
 if (_isItemFounder(item))
-  Container(
-    margin: const EdgeInsets.only(top: 8, bottom: 16),
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-    decoration: BoxDecoration(
-      color: Colors.blue.withOpacity(0.1),
-      borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: Colors.blue.withOpacity(0.3)),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(Icons.person, color: Colors.blue[700], size: 18),
-        const SizedBox(width: 8),
-        Text(
-          'You found this item',
-          style: TextStyle(
-            color: Colors.blue[700],
-            fontWeight: FontWeight.w500,
-            fontSize: 14,
-          ),
-        ),
-      ],
-    ),
-  ),
-                const SizedBox(height: 8),
-                
-                Text(
+  _owner(),
+
+  const SizedBox(height: 8),
+          Text(
                   item['title'] ?? 'No title',
                   style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                 ),
-                                if (_isItemFounder(item))
-                  Container(
-                    margin: const EdgeInsets.only(top: 8, bottom: 8),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.blue.withOpacity(0.3)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.person, size: 16, color: Colors.blue[700]),
-                        const SizedBox(width: 6),
-                        Text(
-                          'You found this item',
-                          style: TextStyle(
-                            color: Colors.blue[700],
-                            fontWeight: FontWeight.w500,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+              if (_isItemFounder(item))
+
                 const SizedBox(height: 16),
                 
                 Expanded(
@@ -1295,7 +1426,8 @@ if (_isItemFounder(item))
                       _buildDetailSection('Date Found', _formatDate(item['created_at'])),
                       
                       const SizedBox(height: 20),
-                      
+                      if(!_isItemFounder(item))
+                        _owner(),
                       Card(
                         color: Colors.green[50],
                         child: Padding(
@@ -1355,7 +1487,35 @@ if (_isItemFounder(item))
       ),
     );
   }
- 
+
+
+ Widget _owner(){
+  return Container(
+  margin: const EdgeInsets.only(top: 8, bottom: 8),
+  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+  decoration: BoxDecoration(
+    color: Colors.blue.withOpacity(0.1),
+    borderRadius: BorderRadius.circular(20),
+    border: Border.all(color: Colors.blue.withOpacity(0.3)),
+  ),
+  child: Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(Icons.person, size: 16, color: Colors.blue[700]),
+      const SizedBox(width: 6),
+      Text(
+        'You found this item',
+        style: TextStyle(
+          color: Colors.blue[700],
+          fontWeight: FontWeight.w500,
+          fontSize: 13,
+        ),
+      ),
+    ],
+  ),
+  );
+                
+ }
  
   void _showPendingDialog() {
     showDialog(
@@ -1474,77 +1634,6 @@ if (_isItemFounder(item))
     );
   }
 
-
-Future<void> _reportFoundMatch(String lostItemStringId, String message , currentUserStringId) async {
-  if (message.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Please describe where and when you found it'),
-        backgroundColor: Colors.orange,
-      ),
-    );
-    return;
-  }
-
-  if (currentUserName == null || currentUserName!.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Your name is missing. Please login again.'),
-        backgroundColor: Colors.red,
-      ),
-    );
-    return;
-  }
-
-  setState(() => isLoading = true);
-
-  try {
-    print('📤 Reporting found match for lost item: $lostItemStringId');
-    
-    final result = await ApiService.reportFoundMatch(
-      lostItemStringId: lostItemStringId, 
-      finderName: currentUserName!,
-      finderPhone: currentUserPhone ?? '',
-      finderMessage: message,
-      userStringId: currentUserStringId.toString(),
-    );
-
-    print('📥 Result: $result');
-
-    if (result['success'] == true) {
-      Navigator.pop(context); 
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result['message'] ?? 'Report submitted successfully!'),
-          backgroundColor: Colors.green,
-          duration: const Duration(seconds: 4),
-        ),
-      );
-      
-      _loadItems();
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result['message'] ?? 'Failed to submit report'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  } catch (e) {
-    print('❌ Error: $e');
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Error: ${e.toString()}'),
-        backgroundColor: Colors.red,
-      ),
-    );
-  } finally {
-    setState(() => isLoading = false);
-  }
-}
-  
-  
 Widget _buildDetailSection(String title, String content) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -1599,7 +1688,8 @@ Widget _buildErrorView() {
       ),
     );
   }
-  String _getImageUrl(String? path) {
+  
+String _getImageUrl(String? path) {
     if (path == null || path.isEmpty) return '';
     if (path.startsWith('http')) return path;
     return 'https://astufindit.x10.mx/index/$path';
