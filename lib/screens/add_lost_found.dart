@@ -2,13 +2,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services/api_service.dart';
-import '../services/auth_service.dart'; // assuming you have this
+import '../services/auth_service.dart';
 
 class ReportItemOrMatchScreen extends StatefulWidget {
-  // For general lost/found report
-  final String? initialType; // 'lost' or 'found'
+  final String? initialType; 
 
-  // For match report (I found this specific lost item)
   final String? lostItemId;
   final String? lostItemTitle;
   final String? lostItemImage;
@@ -29,21 +27,15 @@ class _ReportItemOrMatchScreenState extends State<ReportItemOrMatchScreen> {
   final _formKey = GlobalKey<FormState>();
 
   late bool _isMatchMode;
-  String _reportType = 'lost'; // only used when !_isMatchMode
+  String _reportType = 'lost'; 
 
-  String _selectedCategory = 'electronics';
-
-  // Common controllers
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _locationController = TextEditingController();
   final _additionalInfoController = TextEditingController();
-
-  // Images (multiple supported – especially useful for match mode)
   List<File> _selectedImages = [];
   final ImagePicker _picker = ImagePicker();
 
-  // Match-specific
   DateTime? _foundDate;
   TimeOfDay? _foundTime;
   bool _hasSerialNumber = false;
@@ -54,24 +46,6 @@ class _ReportItemOrMatchScreenState extends State<ReportItemOrMatchScreen> {
   bool _isLoading = false;
   String? _errorMessage;
 
-  // Categories (same as before)
-  final List<Map<String, String>> _categories = [
-    {'value': 'electronics', 'label': '📱 Electronics'},
-    {'value': 'clothing', 'label': '👕 Clothing',},
-    {'value': 'accessories', 'label': '⌚ Accessories'},
-    {'value': 'books', 'label': '📚 Books'},
-    {'value': 'documents', 'label': '📄 Documents'},
-    {'value': 'keys', 'label': '🔑 Keys'},
-    {'value': 'bags', 'label': '🎒 Bags' },
-    {'value': 'wallets', 'label': '👛 Wallets'},
-    {'value': 'phones', 'label': '📱 Phones'},
-    {'value': 'laptops', 'label': '💻 Laptops'},
-    {'value': 'id_cards', 'label': '🪪 ID Cards'},
-    {'value': 'jewelry', 'label': '💍 Jewelry'},
-    {'value': 'toys', 'label': '🧸 Toys',},
-    {'value': 'sports', 'label': '⚽ Sports Equipment'},
-    {'value': 'other', 'label': '📦 Other'},
-  ];
 
   @override
   void initState() {
@@ -82,7 +56,7 @@ class _ReportItemOrMatchScreenState extends State<ReportItemOrMatchScreen> {
     if (_isMatchMode) {
       _reportType = 'found';
       if (widget.lostItemTitle != null) {
-        _titleController.text = 'Found: ${widget.lostItemTitle}';
+        _titleController.text = 'i Found : ${widget.lostItemTitle}';
       }
     } else if (widget.initialType != null &&
         (widget.initialType == 'lost' || widget.initialType == 'found')) {
@@ -171,8 +145,6 @@ class _ReportItemOrMatchScreenState extends State<ReportItemOrMatchScreen> {
     final String? userName = await AuthService.getUserName();
     final String? userPhone = await AuthService.getUserphone();
        
-        print(userName);
-        print(userPhone);
 
       if (_isMatchMode) {
         final props = {
@@ -183,10 +155,7 @@ class _ReportItemOrMatchScreenState extends State<ReportItemOrMatchScreen> {
         };
 
         final message = '''
-        Location: ${_locationController.text.trim()}
         Description match: ${_descriptionController.text.trim()}
-        Found: ${_foundDate != null ? '${_foundDate!.day}/${_foundDate!.month}/${_foundDate!.year}' : '—'} ${_foundTime?.format(context) ?? '—'}
-        Properties: $props
         Extra info: ${_additionalInfoController.text.trim()}
         '''.trim();
         
@@ -196,6 +165,10 @@ class _ReportItemOrMatchScreenState extends State<ReportItemOrMatchScreen> {
           finderPhone: userPhone.toString(), 
           finderMessage: message,
           userStringId: userStringId,
+          title : _titleController.text.trim(),
+          location :_locationController.text.trim(),
+          properties :'$props',
+          foundDate :' ${_foundDate != null ? '${_foundDate!.day}/${_foundDate!.month}/${_foundDate!.year}' : '—'} ${_foundTime?.format(context) ?? '—'}',
           imageFiles: _selectedImages,
         );
       } else {
@@ -204,7 +177,6 @@ class _ReportItemOrMatchScreenState extends State<ReportItemOrMatchScreen> {
           title: _titleController.text.trim(),
           description: _descriptionController.text.trim(),
           location: _locationController.text.trim().isEmpty ? null : _locationController.text.trim(),
-          category: _selectedCategory,
           imageFiles: _selectedImages,
           reporterName:userName.toString(), 
           reporterPhone: userPhone.toString(),    
@@ -241,6 +213,8 @@ class _ReportItemOrMatchScreenState extends State<ReportItemOrMatchScreen> {
 
   @override
   Widget build(BuildContext context) {
+       AuthService.isLoggedIn();
+       print( AuthService.isLoggedIn());
     final isLost = !_isMatchMode && _reportType == 'lost';
     final primaryColor = isLost ? Colors.red : Colors.green;
 
@@ -264,7 +238,6 @@ class _ReportItemOrMatchScreenState extends State<ReportItemOrMatchScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // ── Context header ───────────────────────────────
                       if (_isMatchMode && widget.lostItemTitle != null) ...[
                         Card(
                           color: Colors.blue[50],
@@ -310,7 +283,6 @@ class _ReportItemOrMatchScreenState extends State<ReportItemOrMatchScreen> {
                         const SizedBox(height: 24),
                       ],
 
-                      // ── Type selector (only in general mode) ────────
                       if (!_isMatchMode) ...[
                         const Text(
                           'Report Type *',
@@ -342,9 +314,6 @@ class _ReportItemOrMatchScreenState extends State<ReportItemOrMatchScreen> {
                         ),
                         const SizedBox(height: 24),
                       ],
-
-                      // ── Title ────────────────────────────────────────
-                      if (!_isMatchMode || _titleController.text.isNotEmpty)
                         TextFormField(
                           controller: _titleController,
                           decoration: InputDecoration(
@@ -358,7 +327,6 @@ class _ReportItemOrMatchScreenState extends State<ReportItemOrMatchScreen> {
 
                       if (!_isMatchMode) const SizedBox(height: 20),
 
-                      // ── Photos ───────────────────────────────────────
                       const Text(
                         'Photos',
                         style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -427,7 +395,6 @@ class _ReportItemOrMatchScreenState extends State<ReportItemOrMatchScreen> {
 
                       const SizedBox(height: 24),
 
-                      // ── Description ──────────────────────────────────
                       TextFormField(
                         controller: _descriptionController,
                         maxLines: 4,
@@ -445,7 +412,6 @@ class _ReportItemOrMatchScreenState extends State<ReportItemOrMatchScreen> {
 
                       const SizedBox(height: 24),
 
-                      // ── Location ─────────────────────────────────────
                       TextFormField(
                         controller: _locationController,
                         decoration: InputDecoration(
@@ -459,32 +425,6 @@ class _ReportItemOrMatchScreenState extends State<ReportItemOrMatchScreen> {
                       ),
 
                       const SizedBox(height: 24),
-
-                      // ── Category ─────────────────────────────────────
-                      const Text(
-                        'Category *',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 8),
-                      DropdownButtonFormField<String>(
-                        value: _selectedCategory,
-                        decoration: InputDecoration(
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                        ),
-                        items:  _categories.map((cat) {
-                              return DropdownMenuItem(
-                                value: cat['value'],
-                                child: Row(
-                                  children: [
-                                   Text(cat['value'].toString()),
-                                  ],
-                                ),
-                              );
-                            }).toList(),
-                        onChanged: (v) => setState(() => _selectedCategory = v!),
-                      ),
-
                       if (_isMatchMode) ...[
                         const SizedBox(height: 24),
                         const Text(
@@ -553,7 +493,6 @@ class _ReportItemOrMatchScreenState extends State<ReportItemOrMatchScreen> {
 
                         const SizedBox(height: 24),
 
-                        // ── Additional info ──────────────────────────────
                         TextFormField(
                           controller: _additionalInfoController,
                           maxLines: 3,

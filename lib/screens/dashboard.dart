@@ -1,16 +1,19 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/rendering.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
-import '../services/notification_service.dart';
 import 'add_lost_found.dart';
 import '../services/auth_service.dart';
 import '../widget/appbar.dart';
 import 'notification.dart';
 import 'profile.dart';
 import '../widget/full_screen_image_viewer.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:http/http.dart' as http;
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -22,8 +25,6 @@ class _DashboardScreenState extends State<DashboardScreen>
     with TickerProviderStateMixin {
   late TabController _tabController;
 
-  int _notificationCount = 0;
-  Timer? _notificationTimer;
 
   List<dynamic> lostItems = [];
   List<dynamic> foundItems = [];
@@ -48,7 +49,6 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   @override
   void dispose() {
-    _notificationTimer?.cancel();
     _tabController.dispose();
     super.dispose();
   }
@@ -57,7 +57,6 @@ Future<void> _loadUserData() async {
   final user = await AuthService.getUser();
   if (user != null && mounted) {
     setState(() {
-      currentUserId = user['id'];
       currentUserStringId = user['user_string_id']; 
       currentUserName = user['full_name'];
       currentUserPhone = user['phone'];
@@ -65,11 +64,9 @@ Future<void> _loadUserData() async {
     
     await Future.wait([
       _loadRequestedItems(),
-      _loadNotificationCount(),
+    
     ]);
     await _loadItems();
-    
-    _startNotificationTimer();
   } else {
     if (mounted) {
       setState(() {
@@ -92,32 +89,7 @@ bool _isItemFounder(dynamic item) {
 }
   return false;
 }
-void _startNotificationTimer() {
-    _notificationTimer?.cancel();
-    _notificationTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (currentUserId != null && mounted) {
-        _loadNotificationCount();
-      }
-    });
-  }
 
-Future<void> _loadNotificationCount() async {
-  if (currentUserStringId == null || !mounted) return;
-  
-  try {
-    final result = await NotificationService.getNotifications(
-      userId: currentUserStringId!,
-    );
-    
-    if (result['success'] == true && mounted) {
-      setState(() {
-        _notificationCount = result['unread_count'] ?? 0;
-      });
-    }
-  } catch (e) {
-    // 
-  }
-}
 Future<void> _loadRequestedItems() async {
   if (currentUserStringId == null || !mounted) return;
   
@@ -153,12 +125,13 @@ Future<void> _loadRequestedItems() async {
 
 Future<void> _loadItems() async {
   if (!mounted) return;
+
+  
   
   setState(() {
     isLoading = true;
     errorMessage = null;
   });
-
   try {
     final lostResult = await ApiService.getLostItems();
     final foundResult = await ApiService.getFoundItems(userStringId: currentUserStringId);
@@ -244,19 +217,16 @@ Widget build(BuildContext context) {
     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
     crossAxisAlignment: CrossAxisAlignment.center,
     children: [
-      // Left icons
-      IconButton(
+            IconButton(
         iconSize: 28,
-        icon: const Icon(Icons.home_outlined),
-        onPressed: () {/* home */},
+        icon: const Icon(Icons.notifications_outlined),
+        onPressed: () {
+          Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const  NotificationsScreen()),
+            );
+         },
       ),
-      IconButton(
-        iconSize: 28,
-        icon: const Icon(Icons.list_alt_outlined),
-        onPressed: () {/* my items */},
-      ),
-
-      // Big central action area
       Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -309,41 +279,7 @@ Widget build(BuildContext context) {
         ],
       ),
 
-      IconButton(
-        iconSize: 28,
-        icon: const Icon(Icons.notifications_outlined),
-        onPressed: () {
-          Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const NotificationsScreen()),
-                  ).then((_) => _loadNotificationCount());
-                  },
-      ),
-            if (_notificationCount > 0)
-                Positioned(
-                  right: 8,
-                  top: 8,
-                  child: Container(
-                    padding: const EdgeInsets.all(2),
-                    decoration: BoxDecoration(
-                      color: Colors.red,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    constraints: const BoxConstraints(
-                      minWidth: 16,
-                      minHeight: 16,
-                    ),
-                    child: Text(
-                      _notificationCount > 9 ? '9+' : '$_notificationCount',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-           
+
       IconButton(
         iconSize: 28,
         icon: const Icon(Icons.person_outline),
@@ -360,7 +296,6 @@ Widget build(BuildContext context) {
     );
   }
 
-// widgets and some useful helpers
 Widget _buildLostItemsList() {
     if (lostItems.isEmpty) {
       return Center(
@@ -391,7 +326,6 @@ Widget _buildLostItemsList() {
 Widget _buildLostItemCard(dynamic item) {
   final bool isFounder = _isItemFounder(item);
 
-  // ── Parse the first image from pipe-separated image_path ─────────────────
   String? firstImageUrl;
 
   var rawImagePath = item['image_path']?.toString()?.trim();
@@ -411,7 +345,6 @@ Widget _buildLostItemCard(dynamic item) {
       }
     }
   }
-
   return Card(
     margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
     elevation: 2,
@@ -597,17 +530,16 @@ void _showLostItemDetails(dynamic item) {
               ),
               if (imageUrls.isNotEmpty)
                 Expanded(
-                  flex: 3,
+                  flex: 1,
                   child: Stack(
                     
                     children: [
                   PageView.builder(
-                    controller: _pageController, // if you added arrows earlier
+                    controller: _pageController, 
                     itemCount: imageUrls.length,
                     itemBuilder: (context, index) {
                       return GestureDetector(
                         onTap: () {
-                          // Open full-screen viewer
                           Navigator.push(
                             context,
                             MaterialPageRoute(
@@ -716,9 +648,9 @@ void _showLostItemDetails(dynamic item) {
               ),
 
               const SizedBox(height: 8),
-
+              
               Text(
-                item['title'] ?? 'No title',
+                item['title']  ?? 'No title  ',
                 style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               ),
 
@@ -793,7 +725,7 @@ void _showLostItemDetails(dynamic item) {
                                       context,
                                       MaterialPageRoute(
                                         builder: (context) => ReportItemOrMatchScreen(
-                                          lostItemId: item['item_string_id'] ?? item['id'].toString(),
+                                          lostItemId: item['item_string_id'] ,
                                           lostItemTitle: item['title'] ?? 'Unknown Item',
                                           lostItemImage: imageUrls.isNotEmpty ? imageUrls.first : null,
                                         ),
@@ -827,7 +759,6 @@ void _showLostItemDetails(dynamic item) {
     ),
   );
 }
-
 
 Widget _buildFoundItemsList() {
     if (foundItems.isEmpty) {
@@ -874,6 +805,31 @@ Widget _buildFoundItemCard(dynamic item) {
   
   final bool isRejected = !isFounder && requestStatus[itemId] == 'rejected';
 
+  // ── Parse first image from pipe-separated paths ─────────────────────────
+  String? firstImageUrl;
+  int imageCount = 0;
+  
+  var rawImagePath = item['image_path']?.toString()?.trim();
+
+  if (rawImagePath != null && rawImagePath != 'NULL' && rawImagePath != 'null' && rawImagePath.isNotEmpty) {
+    // Remove wrapping single quotes if present (from DB)
+    if (rawImagePath.startsWith("'") && rawImagePath.endsWith("'")) {
+      rawImagePath = rawImagePath.substring(1, rawImagePath.length - 1).trim();
+    }
+
+    // Split by pipe
+    final paths = rawImagePath.split('|');
+    imageCount = paths.length;
+    
+    // Get first valid image path
+    if (paths.isNotEmpty) {
+      final firstPath = paths.first.trim();
+      if (firstPath.isNotEmpty && firstPath != 'NULL' && firstPath != 'null') {
+        firstImageUrl = _getImageUrl(firstPath);
+      }
+    }
+  }
+
   return Card(
     margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
     elevation: 2,
@@ -898,32 +854,91 @@ Widget _buildFoundItemCard(dynamic item) {
           children: [
             Stack(
               children: [
+                // Image container
                 Container(
                   width: 80,
                   height: 80,
                   decoration: BoxDecoration(
                     color: Colors.green.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.green.withOpacity(0.3)),
                   ),
-                  child: item['image_path'] != null
+                  child: firstImageUrl != null
                       ? ClipRRect(
                           borderRadius: BorderRadius.circular(8),
                           child: Image.network(
-                            _getImageUrl(item['image_path']),
+                            firstImageUrl,
                             fit: BoxFit.cover,
                             width: 80,
                             height: 80,
-                            errorBuilder: (_, __, ___) => Icon(Icons.broken_image, color: Colors.green),
+                            loadingBuilder: (context, child, loadingProgress) {
+                              if (loadingProgress == null) return child;
+                              return Center(
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  value: loadingProgress.expectedTotalBytes != null
+                                      ? loadingProgress.cumulativeBytesLoaded / 
+                                        loadingProgress.expectedTotalBytes!
+                                      : null,
+                                ),
+                              );
+                            },
+                            errorBuilder: (_, __, ___) => Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.broken_image, color: Colors.green[300], size: 30),
+                                const Text(
+                                  'Error',
+                                  style: TextStyle(fontSize: 8),
+                                ),
+                              ],
+                            ),
                           ),
                         )
-                      : Icon(Icons.check_circle, color: Colors.green, size: 40),
+                      : Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.check_circle, color: Colors.green[300], size: 30),
+                            const Text(
+                              'No image',
+                              style: TextStyle(fontSize: 8, color: Colors.grey),
+                            ),
+                          ],
+                        ),
                 ),
+                
+                // Image count badge (if multiple images)
+                if (imageCount > 1 && hasApproved)
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.6),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.photo_library, color: Colors.white, size: 10),
+                          const SizedBox(width: 2),
+                          Text(
+                            '$imageCount',
+                            style: const TextStyle(color: Colors.white, fontSize: 8),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                
+                // Blur overlay for restricted items
                 if (!hasApproved && !isFounder)
                   Positioned.fill(
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(8),
                       child: BackdropFilter(
-                        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                        filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
                         child: Container(
                           color: Colors.black.withOpacity(0.2),
                         ),
@@ -931,6 +946,7 @@ Widget _buildFoundItemCard(dynamic item) {
                     ),
                   ),
                 
+                // Lock/Block overlay for restricted items
                 if (!hasApproved && !isFounder)
                   Positioned.fill(
                     child: Container(
@@ -948,10 +964,11 @@ Widget _buildFoundItemCard(dynamic item) {
                     ),
                   ),
                 
+                // Checkmark for approved access
                 if (hasApproved)
                   const Positioned(
                     top: 4,
-                    right: 4,
+                    left: 4,
                     child: CircleAvatar(
                       radius: 12,
                       backgroundColor: Colors.green,
@@ -959,6 +976,7 @@ Widget _buildFoundItemCard(dynamic item) {
                     ),
                   ),
 
+                // Founder badge
                 if (isFounder)
                   const Positioned(
                     top: 4,
@@ -988,6 +1006,8 @@ Widget _buildFoundItemCard(dynamic item) {
                             fontSize: 16,
                             color: hasApproved ? Colors.black : Colors.grey[700],
                           ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       if (isFounder)
@@ -999,7 +1019,7 @@ Widget _buildFoundItemCard(dynamic item) {
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
-                            'FOUNDER',
+                            'YOU',
                             style: TextStyle(
                               color: Colors.blue[700],
                               fontSize: 8,
@@ -1052,6 +1072,8 @@ Widget _buildFoundItemCard(dynamic item) {
                   ),
                   
                   const SizedBox(height: 4),
+                  
+                  // Location
                   Row(
                     children: [
                       Icon(Icons.location_on, size: 14, color: Colors.grey[500]),
@@ -1060,11 +1082,14 @@ Widget _buildFoundItemCard(dynamic item) {
                         child: Text(
                           item['location'] ?? 'Unknown',
                           style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
                   ),
                   
+                  // Description (only for approved access)
                   if (hasApproved) ...[
                     const SizedBox(height: 8),
                     Text(
@@ -1077,11 +1102,14 @@ Widget _buildFoundItemCard(dynamic item) {
                     Text(
                       'Reported by: ${item['reporter_name'] ?? 'Anonymous'}',
                       style: TextStyle(color: Colors.grey[400], fontSize: 11),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                   
                   const SizedBox(height: 8),
                   
+                  // Founder info
                   if (isFounder)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1107,6 +1135,7 @@ Widget _buildFoundItemCard(dynamic item) {
                       ),
                     ),
                   
+                  // Action button for non-founders
                   if (!isClaimed && !hasApproved && !isFounder)
                     Align(
                       alignment: Alignment.centerRight,
@@ -1117,9 +1146,16 @@ Widget _buildFoundItemCard(dynamic item) {
                                 color: Colors.blue.withOpacity(0.1),
                                 borderRadius: BorderRadius.circular(12),
                               ),
-                              child: const Text(
-                                'Awaiting Review',
-                                style: TextStyle(color: Colors.blue, fontSize: 11),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.access_time, size: 12, color: Colors.blue),
+                                  const SizedBox(width: 4),
+                                  const Text(
+                                    'Awaiting Review',
+                                    style: TextStyle(color: Colors.blue, fontSize: 11),
+                                  ),
+                                ],
                               ),
                             )
                           : isRejected
@@ -1129,9 +1165,16 @@ Widget _buildFoundItemCard(dynamic item) {
                                     color: Colors.red.withOpacity(0.1),
                                     borderRadius: BorderRadius.circular(12),
                                   ),
-                                  child: const Text(
-                                    'Request Rejected',
-                                    style: TextStyle(color: Colors.red, fontSize: 11),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.block, size: 12, color: Colors.red),
+                                      const SizedBox(width: 4),
+                                      const Text(
+                                        'Request Rejected',
+                                        style: TextStyle(color: Colors.red, fontSize: 11),
+                                      ),
+                                    ],
                                   ),
                                 )
                               : TextButton.icon(
@@ -1157,317 +1200,686 @@ Widget _buildFoundItemCard(dynamic item) {
     ),
   );
 }
- 
-void _showRequestAccessDialog(dynamic item) {
-    final TextEditingController messageController = TextEditingController();
-    final _formKey = GlobalKey<FormState>();
 
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.help, color: Colors.blue[700]),
-            const SizedBox(width: 8),
-            const Text('Claim This Item'),
-          ],
-        ),
-        content: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Please provide details to prove this item belongs to you:',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-              ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue[100]!),
-                ),
+void _showRequestAccessDialog(dynamic item) {
+  final TextEditingController descriptionController = TextEditingController();
+  final TextEditingController lostLocationController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+
+  final List<XFile> _selectedImages = []; 
+  final ImagePicker _picker = ImagePicker();
+
+  Future<void> _pickImages() async {
+    try {
+      final List<XFile>? images = await _picker.pickMultiImage(
+        imageQuality: 85,
+        maxWidth: 1200,
+      );
+
+      if (images != null && images.isNotEmpty) {
+        setState(() {
+          _selectedImages.addAll(images);
+        });
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error picking images: $e")),
+      );
+    }
+  }
+
+  Future<void> _removeImage(int index) async {
+    setState(() {
+      _selectedImages.removeAt(index);
+    });
+  }
+  showDialog(
+    context: context,
+    builder: (dialogContext) {
+      return StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.accessible_sharp, color: Colors.blue[700]),
+                const SizedBox(width: 12),
+                const Text('Claim This Item'),
+              ],
+            ),
+            content: Form(
+              key: _formKey,
+              child: SingleChildScrollView(
                 child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Item: ${item['title']}', 
-                      style: const TextStyle(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
-                    Text('Found at: ${item['location']}'),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.blue[50],
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.blue[100]!),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item['title'] ?? 'Unknown Item',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Found at: ${item['location'] ?? '—'}',
+                            style: TextStyle(color: Colors.grey[700]),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
+                    Text(
+                      'Where and when did you lose this item?',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey[800],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      controller: lostLocationController,
+                      decoration: InputDecoration(
+                        hintText: 'e.g. Bole Road, Addis Ababa - around Jan 15, 2026',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        filled: true,
+                        fillColor: Colors.grey[50],
+                        prefixIcon: const Icon(Icons.location_on_outlined),
+                      ),
+                      textCapitalization: TextCapitalization.sentences,
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Please tell us where you lost it';
+                        }
+                        return null;
+                      },
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // Description / proof
+                    Text(
+                      'Describe unique features or proof of ownership',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey[800],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      controller: descriptionController,
+                      maxLines: 5,
+                      minLines: 3,
+                      decoration: InputDecoration(
+                        hintText:
+                            'Serial number, color, scratches, purchase receipt details, when/where you got it, distinctive marks...',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        filled: true,
+                        fillColor: Colors.grey[50],
+                      ),
+                      textCapitalization: TextCapitalization.sentences,
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Please provide some proof details';
+                        }
+                        if (value.trim().length < 20) {
+                          return 'Please add more information (at least 20 characters)';
+                        }
+                        return null;
+                      },
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    // Images – optional but recommended
+                    Text(
+                      'Add photos (optional but strongly recommended)',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.grey[800],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    Row(
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: _pickImages,
+                          icon: const Icon(Icons.add_photo_alternate),
+                          label: const Text('Add Photos'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                          ),
+                        ),
+                        const Spacer(),
+                        if (_selectedImages.isNotEmpty)
+                          Text(
+                            '${_selectedImages.length} selected',
+                            style: TextStyle(
+                              color: Colors.blue[700],
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    if (_selectedImages.isNotEmpty)
+                      SizedBox(
+                        height: 110,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: _selectedImages.length,
+                          itemBuilder: (context, index) {
+                            final file = _selectedImages[index];
+                            return Stack(
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 12),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(10),
+                                    child: Image.file(
+                                      File(file.path),
+                                      width: 100,
+                                      height: 100,
+                                      fit: BoxFit.cover,
+                                    ),
+                                  ),
+                                ),
+                                Positioned(
+                                  top: -4,
+                                  right: 4,
+                                  child: GestureDetector(
+                                    onTap: () => _removeImage(index),
+                                    child: CircleAvatar(
+                                      radius: 14,
+                                      backgroundColor: Colors.red,
+                                      child: const Icon(
+                                        Icons.close,
+                                        size: 16,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Photos of the item from when you owned it help admins verify your claim faster.',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
-              const Text(
-                'Describe unique features, when you lost it, or any proof:',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
               ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: messageController,
-                maxLines: 4,
-                decoration: InputDecoration(
-                  hintText: 'e.g., serial number, color, scratches, when/where you lost it...',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  filled: true,
-                  fillColor: Colors.grey[50],
-                ),
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please provide some details';
+              ElevatedButton.icon(
+                onPressed: () async {
+                  if (_formKey.currentState!.validate()) {
+                    Navigator.pop(dialogContext);
+
+                    final claimData = {
+                      'item_id': item['id'] is String
+                          ? int.tryParse(item['id']) ?? 0
+                          : item['id'],
+                      'description': descriptionController.text.trim(),
+                      'lost_location': lostLocationController.text.trim(),
+                      'image_paths': _selectedImages.map((f) => f.path).toList(),
+                    };
+
+                    await _submitAccessRequest(claimData);
                   }
-                  if (value.length < 10) {
-                    return 'Please provide more details (min 10 characters)';
-                  }
-                  return null;
                 },
+                icon: const Icon(Icons.send),
+                label: const Text('Submit Claim'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green[700],
+                  foregroundColor: Colors.white,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                ),
               ),
             ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton.icon(
-            onPressed: () async {
-              if (_formKey.currentState!.validate()) {
-                Navigator.pop(context);
-                int itemId = item['id'] is String ? int.parse(item['id']) : item['id'];
-                await _submitAccessRequest(itemId, messageController.text);
-              }
-            },
-            icon: const Icon(Icons.send),
-            label: const Text('Submit Claim'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
             ),
-          ),
-        ],
-      ),
-    );
-  }
+          );
+        },
+      );
+    },
+  );
+}
 
-// i will work in this  
-Future<void> _submitAccessRequest(int itemId, String message) async {
-  if (message.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Please provide details about your item'),
-        backgroundColor: Colors.orange,
-      ),
-    );
-    return;
-  }
-
-  if (currentUserStringId == null) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('You must be logged in'),
-        backgroundColor: Colors.red,
-      ),
-    );
-    return;
-  }
-
-  setState(() => isLoading = true);
-
+Future<void> _submitAccessRequest(Map<String, dynamic> claimData) async {
   try {
-    final result = await ApiService.requestItemAccess(
-      userStringId: currentUserStringId!, 
-      itemId: itemId,
-      message: message,
-    );
+    final uri = Uri.parse('${ApiService.baseUrl}?action=submit-item-claim');
 
-    if (result['success'] == true) {
-      setState(() {
-        requestedItems.add(itemId);
-        requestStatus[itemId] = 'pending';
-      });
-      
-      _showSuccessDialog(
-        'Claim submitted successfully!', 
-        'Admin will review your request. You will be notified once approved.'
-      );
-      
-      _loadItems();
+    var request = http.MultipartRequest('POST', uri);
+
+    // Text fields
+    request.fields['item_id']         = claimData['item_id'].toString();
+    request.fields['user_string_id']  = await AuthService.getUserStringId() ?? '';
+    request.fields['description']     = claimData['description'];
+    request.fields['lost_location']   = claimData['lost_location'];
+
+    // Images (if any)
+    for (String path in claimData['image_paths']) {
+      var file = await http.MultipartFile.fromPath('images[]', path);
+      request.files.add(file);
+    }
+
+    final response = await request.send();
+
+    if (response.statusCode == 200) {
+      final respStr = await response.stream.bytesToString();
+      final json = jsonDecode(respStr);
+
+      if (json['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(json['message'] ?? 'Claim submitted!'), backgroundColor: Colors.green),
+        );
+      } else {
+        throw Exception(json['message'] ?? 'Server rejected the claim');
+      }
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result['message'] ?? 'Failed to submit claim'),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 3),
-        ),
-      );
+      throw Exception('Server error: ${response.statusCode}');
     }
   } catch (e) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Error: ${e.toString()}'),
-        backgroundColor: Colors.red,
-      ),
+      SnackBar(content: Text('Failed to submit claim: $e'), backgroundColor: Colors.red),
     );
-  } finally {
-    setState(() => isLoading = false);
   }
 }
 
-
 void _showFoundItemDetails(dynamic item) {
-    
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.9,
-        minChildSize: 0.5,
-        maxChildSize: 0.95,
-        expand: false,
-        builder: (context, scrollController) {
-          return Container(
-            padding: const EdgeInsets.all(20),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.grey[300],
-                      borderRadius: BorderRadius.circular(2),
-                    ),
+  List<String> imageUrls = [];
+
+  var rawPath = item['image_path']?.toString()?.trim();
+
+  if (rawPath != null && rawPath != 'NULL' && rawPath != 'null' && rawPath.isNotEmpty) {
+    if (rawPath.startsWith("'") && rawPath.endsWith("'")) {
+      rawPath = rawPath.substring(1, rawPath.length - 1).trim();
+    }
+    final paths = rawPath.split('|');
+    imageUrls = paths
+        .map<String>((String p) {
+          final cleanPath = p.trim();
+          if (cleanPath.isEmpty || cleanPath == 'NULL' || cleanPath == 'null') return '';
+          return _getImageUrl(cleanPath);
+        })
+        .where((url) => url.isNotEmpty)
+        .toList();
+  }
+  final _pageController = PageController();
+
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (context) => DraggableScrollableSheet(
+      initialChildSize: 0.9,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (context, scrollController) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Drag handle
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
-                const SizedBox(height: 20),
-                
-                if (item['image_path'] != null)
-                  Container(
-                    height: 200,
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Image.network(
-                        _getImageUrl(item['image_path']),
-                        fit: BoxFit.cover,
-                        width: double.infinity,
-                        height: 200,
+              ),
+              const SizedBox(height: 20),
+              if (imageUrls.isNotEmpty)
+                SizedBox(
+                  height: 220,
+                  child: Stack(
+                    children: [
+                      PageView.builder(
+                        controller: _pageController,
+                        itemCount: imageUrls.length,
+                        itemBuilder: (context, index) {
+                          return GestureDetector(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => FullScreenImageViewer(
+                                    images: imageUrls,
+                                    initialIndex: index,
+                                  ),
+                                ),
+                              );
+                            },
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(16),
+                              child: Image.network(
+                                imageUrls[index],
+                                fit: BoxFit.cover,
+                                width: double.infinity,
+                                height: 220,
+                                loadingBuilder: (context, child, loadingProgress) {
+                                  if (loadingProgress == null) return child;
+                                  return Container(
+                                    color: Colors.grey[200],
+                                    child: Center(
+                                      child: CircularProgressIndicator(
+                                        value: loadingProgress.expectedTotalBytes != null
+                                            ? loadingProgress.cumulativeBytesLoaded /
+                                                loadingProgress.expectedTotalBytes!
+                                            : null,
+                                      ),
+                                    ),
+                                  );
+                                },
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Container(
+                                    color: Colors.grey[200],
+                                    child: const Center(
+                                      child: Icon(Icons.broken_image, size: 60, color: Colors.red),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          );
+                        },
                       ),
+                      Positioned(
+                        bottom: 16,
+                        left: 16,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.6),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            '${_pageController.hasClients ? _pageController.page?.toInt() ?? 1 : 1}/${imageUrls.length}',
+                            style: const TextStyle(color: Colors.white, fontSize: 12),
+                          ),
+                        ),
+                      ),
+
+                      if (imageUrls.length > 1)
+                        Positioned(
+                          bottom: 16,
+                          right: 16,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.5),
+                              borderRadius: BorderRadius.circular(30),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.arrow_left, color: Colors.white, size: 24),
+                                  onPressed: () {
+                                    _pageController.previousPage(
+                                      duration: const Duration(milliseconds: 400),
+                                      curve: Curves.easeInOut,
+                                    );
+                                  },
+                                ),
+                                Container(
+                                  width: 1,
+                                  height: 24,
+                                  color: Colors.white.withOpacity(0.3),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.arrow_right, color: Colors.white, size: 24),
+                                  onPressed: () {
+                                    _pageController.nextPage(
+                                      duration: const Duration(milliseconds: 400),
+                                      curve: Curves.easeInOut,
+                                    );
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                )
+              else
+                Container(
+                  height: 180,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[200],
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Center(
+                    child: Icon(Icons.image_not_supported, size: 60, color: Colors.grey),
+                  ),
+                ),
+
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Text(
+                      'FOUND ITEM',
+                      style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
                     ),
                   ),
-                
-                const SizedBox(height: 16),
-                
-                Row(
-                  children: [
+                  const Spacer(),
+                  if (_isItemFounder(item))
+                    Container(
+                      margin: const EdgeInsets.only(right: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.person, size: 14, color: Colors.blue[700]),
+                          const SizedBox(width: 4),
+                          Text(
+                            'YOU',
+                            style: TextStyle(
+                              color: Colors.blue[700],
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (item['status'] == 'approved' || item['access_level'] == 'accessible')
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                       decoration: BoxDecoration(
                         color: Colors.green.withOpacity(0.1),
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      child: const Text(
-                        'FOUND ITEM',
-                        style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.check_circle, size: 14, color: Colors.green[700]),
+                          const SizedBox(width: 4),
+                          Text(
+                            'ACCESS GRANTED',
+                            style: TextStyle(
+                              color: Colors.green[700],
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    const Spacer(),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: const Text(
-                        'ACCESS GRANTED',
-                        style: TextStyle(color: Colors.blue, fontSize: 11),
-                      ),
-                    ),
-                  ],
-                ),
+                ],
+              ),
 
-if (_isItemFounder(item))
-  _owner(),
+              const SizedBox(height: 8),
 
-  const SizedBox(height: 8),
-          Text(
-                  item['title'] ?? 'No title',
-                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                ),
-              if (_isItemFounder(item))
+              // Title
+              Text(
+                item['title'] ?? 'No title',
+                style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              ),
 
-                const SizedBox(height: 16),
-                
-                Expanded(
-                  child: ListView(
-                    controller: scrollController,
-                    children: [
-                      _buildDetailSection('Description', item['description'] ?? 'No description'),
-                      _buildDetailSection('Location', item['location'] ?? 'Unknown'),
-                      _buildDetailSection('Category', item['category'] ?? 'Other'),
-                      _buildDetailSection('Reported By', '${item['reporter_name'] ?? 'Anonymous'} • ${item['reporter_phone'] ?? 'No phone'}'),
-                      _buildDetailSection('Date Found', _formatDate(item['created_at'])),
-                      
-                      const SizedBox(height: 20),
-                      if(!_isItemFounder(item))
-                        _owner(),
+              const SizedBox(height: 16),
+              Expanded(
+                child: ListView(
+                  controller: scrollController,
+                  children: [
+                    _buildDetailSection('Description', item['description'] ?? 'No description'),
+                    _buildDetailSection('Location', item['location'] ?? 'Unknown'),
+                    _buildDetailSection('Category', item['category'] ?? 'Other'),
+                    _buildDetailSection('Reported By', 
+                        '${item['reporter_name'] ?? 'Anonymous'} • ${item['reporter_phone'] ?? 'No phone'}'),
+                    _buildDetailSection('Date Found', _formatDate(item['created_at'])),
+                    
+                    if (item['found_item_property'] != null && item['found_item_property'].toString().isNotEmpty)
+                      _buildDetailSection('Item Property', item['found_item_property']),
+                    
+                    if (item['when_lost'] != null && item['when_lost'].toString().isNotEmpty)
+                      _buildDetailSection('When Lost', item['when_lost']),
+                    
+                    const SizedBox(height: 20),
+                    if (!_isItemFounder(item) && (item['status'] == 'approved' || item['access_level'] == 'accessible'))
                       Card(
                         color: Colors.green[50],
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                         child: Padding(
                           padding: const EdgeInsets.all(16),
                           child: Column(
                             children: [
-                              const Icon(Icons.check_circle, color: Colors.green, size: 40),
+                              const Icon(Icons.check_circle, color: Colors.green, size: 48),
                               const SizedBox(height: 8),
                               const Text(
                                 'You have access to this item',
-                                style: TextStyle(fontWeight: FontWeight.bold),
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                               ),
                               const SizedBox(height: 4),
                               Text(
                                 'Contact the finder to arrange return',
                                 style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                                textAlign: TextAlign.center,
                               ),
                               const SizedBox(height: 12),
+                              
+                              // Reporter contact info
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Column(
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(Icons.person, size: 16, color: Colors.grey[600]),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          item['reporter_name'] ?? 'Anonymous',
+                                          style: const TextStyle(fontWeight: FontWeight.w500),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      children: [
+                                        Icon(Icons.phone, size: 16, color: Colors.grey[600]),
+                                        const SizedBox(width: 8),
+                                        Text(item['reporter_phone'] ?? 'No phone provided'),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              
+                              const SizedBox(height: 12),
+                              
+                              // Action buttons
                               Row(
                                 children: [
                                   Expanded(
                                     child: OutlinedButton.icon(
                                       onPressed: () {
-                                        // TODO: Implement call
+                                        _launchPhone(item['reporter_phone']);
                                       },
-                                      icon: const Icon(Icons.phone),
+                                      icon: const Icon(Icons.phone, size: 18),
                                       label: const Text('Call'),
+                                      style: OutlinedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(vertical: 12),
+                                      ),
                                     ),
                                   ),
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: ElevatedButton.icon(
                                       onPressed: () {
-                                        // TODO: Implement message
+                                        _launchSMS(item['reporter_phone']);
                                       },
-                                      icon: const Icon(Icons.message),
+                                      icon: const Icon(Icons.message, size: 18),
                                       label: const Text('Message'),
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: Colors.green,
                                         foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(vertical: 12),
                                       ),
                                     ),
                                   ),
@@ -1477,19 +1889,82 @@ if (_isItemFounder(item))
                           ),
                         ),
                       ),
-                    ],
-                  ),
+                    if (!_isItemFounder(item) && item['status'] == 'pending')
+                      Card(
+                        color: Colors.orange[50],
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            children: [
+                              const Icon(Icons.access_time, color: Colors.orange, size: 40),
+                              const SizedBox(height: 8),
+                              const Text(
+                                'Access Pending',
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Your request to access this item is pending approval',
+                                style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    if (!_isItemFounder(item) && 
+                        item['status'] != 'approved' && 
+                        item['status'] != 'pending' && 
+                        item['access_level'] != 'accessible')
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: ElevatedButton.icon(
+                          onPressed: () =>_showRequestAccessDialog(item),
+                          icon: const Icon(Icons.lock_open),
+                          label: const Text('Request Access to View Details'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
+              ),
+            ],
+          ),
+        );
+      },
+    ),
+  );
+}
+
+void _launchPhone(String? phone) async {
+  if (phone == null || phone.isEmpty) return;
+  final Uri launchUri = Uri(scheme: 'tel', path: phone);
+  if (await canLaunchUrl(launchUri)) {
+    await launchUrl(launchUri);
+  } else {
+    throw 'Could not launch $phone';
   }
+}
 
+void _launchSMS(String? phone) async {
+  if (phone == null || phone.isEmpty) return;
+  final Uri launchUri = Uri(
+    scheme: 'sms',
+    path: phone,
+    queryParameters: {'body': 'Hello, I am interested in the item you found...'},
+  );
+  if (await canLaunchUrl(launchUri)) {
+    await launchUrl(launchUri);
+  } else {
+    throw 'Could not launch SMS';
+  }
+}
 
- Widget _owner(){
+Widget _owner(){
   return Container(
   margin: const EdgeInsets.only(top: 8, bottom: 8),
   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -1504,7 +1979,7 @@ if (_isItemFounder(item))
       Icon(Icons.person, size: 16, color: Colors.blue[700]),
       const SizedBox(width: 6),
       Text(
-        'You found this item',
+        'You post this item ',
         style: TextStyle(
           color: Colors.blue[700],
           fontWeight: FontWeight.w500,
@@ -1517,7 +1992,7 @@ if (_isItemFounder(item))
                 
  }
  
-  void _showPendingDialog() {
+void _showPendingDialog() {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1563,7 +2038,7 @@ if (_isItemFounder(item))
     );
   }
 
-  void _showRejectedDialog() {
+void _showRejectedDialog() {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1609,31 +2084,6 @@ if (_isItemFounder(item))
     );
   }
 
-  void _showSuccessDialog(String title, String message) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.check_circle, color: Colors.green[700]),
-            const SizedBox(width: 8),
-            Text(title),
-          ],
-        ),
-        content: Container(
-          padding: const EdgeInsets.all(8),
-          child: Text(message),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
 Widget _buildDetailSection(String title, String content) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -1659,7 +2109,6 @@ Widget _buildDetailSection(String title, String content) {
       ),
     );
   }
-
 
 String _formatDate(String? dateString) {
     if (dateString == null) return 'Unknown';
