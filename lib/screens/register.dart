@@ -41,7 +41,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       }
 
       final loginResult = await ApiService.login(
-        student_id: _studentidController.text.trim(),
+        studentId: _studentidController.text.trim(),
         password: _passwordController.text,
       );
 

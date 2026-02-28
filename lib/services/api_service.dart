@@ -59,47 +59,65 @@ static Future<Map<String, dynamic>> register({
 
 
 static Future<Map<String, dynamic>> login({
-  required String student_id,
+  required String studentId,
   required String password,
 }) async {
   try {
-    final response = await http.post(
-      Uri.parse('$baseUrl?action=login'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'student_id': student_id,
-        'password': password,
-      }),
-    );
-    final data = jsonDecode(response.body);
-    if (response.statusCode == 200 && data['message'] == 'Logged in successfully') {
-      if (data['user'] != null) {
+    final uri = Uri.parse('$baseUrl?action=login');
+
+    final response = await http
+        .post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'student_id': studentId,
+            'password': password,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    if (response.statusCode != 200) {
+      print(response.body);
+      return {
+        'success': false,
+        'message': data['message'],
+        'status': response.statusCode,
+      };
+    }
+    
+    if (data['success'] == true) {
+      final user = data['user'] as Map<String, dynamic>?;
+
+      if (user != null) {
         await AuthService.saveUser(
-          userStringId: data['user']['user_string_id'], 
-          student_id: data['user']['student_id'],
-          fullName: data['user']['full_name'],
-          phone: data['user']['phone'],
-          role: data['user']['role'],
+          userStringId: user['user_string_id'] as String? ?? '',
+          student_id: user['student_id'] as String? ?? '',
+          fullName: user['full_name'] as String? ?? '',
+          phone: user['phone'] as String? ?? '',
+          role: user['role'] as String? ?? 'student',
         );
       }
+
       return {
         'success': true,
-        'user': data['user'],
-        'message': 'Login successful',
+        'user': user,
+        'message': data['message'] ?? 'Login successful',
       };
     } else {
       return {
         'success': false,
-        'message': data['error'] ?? data['message'] ?? 'Login failed',
+        'message': data['message'] ?? data['error'] ?? 'Login failed',
         'status': response.statusCode,
       };
     }
-  } catch (e) {
-    print(e);
-    return {'success': false, 'message': 'Network error: $e'};
+  } catch (e, stack) {
+    print('Login error: $e\n$stack');
+    return {
+      'success': false,
+      'message': 'Network or login error: $e',
+    };
   }
 }
-
 // works
 static Future<Map<String, dynamic>> reportlostItem({
   required String type,

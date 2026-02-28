@@ -30,7 +30,7 @@ class MyApp extends StatelessWidget {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Scaffold(body: Center(child: CircularProgressIndicator()));
           }
-          return snapshot.data ?? const LoginScreen();
+          return snapshot.data ?? const DashboardScreen();
         },
       ),
     );

@@ -31,7 +31,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       final result = await ApiService.login(
-        student_id: _studentidController.text.trim(),
+        studentId: _studentidController.text.trim(),
         password: _passwordController.text,
       );
       if (result['success'] == true) {
@@ -105,11 +105,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   decoration: InputDecoration(
                     labelText: 'Student Id',
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                    prefixIcon: const Icon(Icons.email_outlined),
+                    prefixIcon: const Icon(Icons.insert_drive_file),
                     filled: true,
                     fillColor: Colors.grey[50],
                   ),
-                  keyboardType: TextInputType.emailAddress,
+                  keyboardType: TextInputType.text,
                   textInputAction: TextInputAction.next,
                   validator: (v) {
                     if (v == null || v.trim().isEmpty) return 'Student id is required';
