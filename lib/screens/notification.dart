@@ -1,4 +1,3 @@
-// lib/screens/notifications_screen.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:lost_found_app/services/auth_service.dart';

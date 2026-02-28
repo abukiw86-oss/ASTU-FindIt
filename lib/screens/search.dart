@@ -1,4 +1,3 @@
-// screens/search_filter_page.dart
 import 'package:flutter/material.dart';
 import 'package:lost_found_app/services/serach_service.dart';
 import '../services/auth_service.dart';
@@ -31,7 +30,7 @@ class _SearchFilterPageState extends State<SearchFilterPage> {
     super.dispose();
   }
 
-  Future<void> _loadUserData() async {
+Future<void> _loadUserData() async {
     final user = await AuthService.getUser();
     if (user != null) {
       setState(() {
@@ -39,6 +38,7 @@ class _SearchFilterPageState extends State<SearchFilterPage> {
       });
     }
   }
+
 Future<void> _performSearch() async {
   if (_searchController.text.trim().isEmpty) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -81,8 +81,8 @@ Future<void> _performSearch() async {
     });
   }
 }
-  // Clear search
-  void _clearSearch() {
+
+void _clearSearch() {
     setState(() {
       _searchController.clear();
       _searchResults = [];
@@ -91,7 +91,7 @@ Future<void> _performSearch() async {
   }
 
   @override
-  Widget build(BuildContext context) {
+Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Search Items'),
@@ -194,8 +194,6 @@ Future<void> _performSearch() async {
               ],
             ),
           ),
-          
-          // Results count
           if (_searchResults.isNotEmpty)
             Padding(
               padding: const EdgeInsets.all(12),
@@ -283,11 +281,11 @@ Future<void> _performSearch() async {
       ),
     );
   }
+
 Widget _buildItemCard(Map<String, dynamic> item) {
   final isLost = item['type'] == 'lost';
   final isFounder = item['user_string_id'] == _currentUserId;
   
-  // Get images from server response
   final List<dynamic> imageList = item['image_list'] ?? [];
   final bool hasMultipleImages = imageList.length > 1;
   final String? firstImage = imageList.isNotEmpty ? imageList.first : null;
@@ -360,9 +358,7 @@ Widget _buildItemCard(Map<String, dynamic> item) {
                   ),
               ],
             ),
-            const SizedBox(width: 12),
-            
-            // Details
+            const SizedBox(width: 12), 
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -457,7 +453,6 @@ Widget _buildItemCard(Map<String, dynamic> item) {
   );
 }
 
-
 void _showItemDetails(Map<String, dynamic> item) {
   final List<dynamic> imageList = item['image_list'] ?? [];
   
@@ -472,7 +467,6 @@ void _showItemDetails(Map<String, dynamic> item) {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header with close button
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -513,7 +507,6 @@ void _showItemDetails(Map<String, dynamic> item) {
                   },
                 ),
               ),
-              // Image counter
               Center(
                 child: Container(
                   margin: const EdgeInsets.symmetric(vertical: 8),
@@ -529,9 +522,7 @@ void _showItemDetails(Map<String, dynamic> item) {
                 ),
               ),
               const SizedBox(height: 8),
-            ],
-            
-            // Details
+            ], 
             _buildDetailRow('Type', item['type'] ?? 'Unknown'),
             _buildDetailRow('Description', item['description'] ?? 'No description'),
             _buildDetailRow('Location', item['location'] ?? 'Unknown'),
@@ -539,9 +530,7 @@ void _showItemDetails(Map<String, dynamic> item) {
             _buildDetailRow('Reported by', item['reporter_name'] ?? 'Anonymous'),
             _buildDetailRow('Contact', item['reporter_phone'] ?? 'No phone'),
             
-            const SizedBox(height: 16),
-            
-            // Close button
+            const SizedBox(height: 16), 
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
@@ -589,8 +578,7 @@ void _showFullScreenImage(List<dynamic> images, int initialIndex) {
       backgroundColor: Colors.black,
       insetPadding: EdgeInsets.zero,
       child: Stack(
-        children: [
-          // Image pages
+        children: [ 
           PageView.builder(
             controller: pageController,
             itemCount: images.length,
@@ -608,8 +596,7 @@ void _showFullScreenImage(List<dynamic> images, int initialIndex) {
               );
             },
           ),
-          
-          // Close button
+           
           Positioned(
             top: 40,
             right: 16,
@@ -625,7 +612,6 @@ void _showFullScreenImage(List<dynamic> images, int initialIndex) {
             ),
           ),
           
-          // Image counter
           Positioned(
             bottom: 20,
             left: 0,

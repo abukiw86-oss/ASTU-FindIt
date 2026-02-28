@@ -1,10 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:lost_found_app/services/api_service.dart';
-import 'dart:io';
-import '../services/auth_service.dart';
-import 'package:http_parser/http_parser.dart';
-import 'package:path/path.dart' as path; 
 class search{
 static Future<Map<String, dynamic>> simpleSearch({
   required String query,
@@ -12,7 +8,6 @@ static Future<Map<String, dynamic>> simpleSearch({
   String? userId,
 }) async {
   try {
-    // Build simple query parameters
     final queryParams = <String, String>{
       'action': 'simple-search',
       'query': query,
@@ -35,8 +30,6 @@ static Future<Map<String, dynamic>> simpleSearch({
     return {'success': false, 'message': 'Network error'};
   }
 }
-
-// Optional: Get simple item details
 static Future<Map<String, dynamic>> getSimpleItemDetails(int itemId) async {
   try {
     final response = await http.get(

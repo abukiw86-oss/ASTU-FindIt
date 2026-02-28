@@ -25,12 +25,10 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
   bool _isLoading = true;
   bool _isEditingProfile = false;
   bool _isSavingItem = false;
-
-  // Profile editing
+ 
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
-
-  // Item editing
+ 
   String? _editingItemId;
   final _editTitleController = TextEditingController();
   final _editDescriptionController = TextEditingController();
@@ -42,25 +40,6 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
   List<String> _removedImagePaths = [];
 
   final ImagePicker _picker = ImagePicker();
-
-  // Categories
-  final List<Map<String, dynamic>> _categories = [
-    {'value': 'electronics', 'label': '📱 Electronics', 'icon': Icons.phone_android},
-    {'value': 'clothing', 'label': '👕 Clothing', 'icon': Icons.checkroom},
-    {'value': 'accessories', 'label': '⌚ Accessories', 'icon': Icons.watch},
-    {'value': 'books', 'label': '📚 Books', 'icon': Icons.menu_book},
-    {'value': 'documents', 'label': '📄 Documents', 'icon': Icons.description},
-    {'value': 'keys', 'label': '🔑 Keys', 'icon': Icons.vpn_key},
-    {'value': 'bags', 'label': '🎒 Bags', 'icon': Icons.backpack},
-    {'value': 'wallets', 'label': '👛 Wallets', 'icon': Icons.account_balance_wallet},
-    {'value': 'phones', 'label': '📱 Phones', 'icon': Icons.phone_iphone},
-    {'value': 'laptops', 'label': '💻 Laptops', 'icon': Icons.laptop},
-    {'value': 'id_cards', 'label': '🪪 ID Cards', 'icon': Icons.credit_card},
-    {'value': 'jewelry', 'label': '💍 Jewelry', 'icon': Icons.diamond},
-    {'value': 'toys', 'label': '🧸 Toys', 'icon': Icons.toys},
-    {'value': 'sports', 'label': '⚽ Sports Equipment', 'icon': Icons.sports_soccer},
-    {'value': 'other', 'label': '📦 Other', 'icon': Icons.category},
-  ];
 
   @override
   void initState() {
@@ -78,12 +57,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     _editDescriptionController.dispose();
     _editLocationController.dispose();
     super.dispose();
-  }
-
-  // ────────────────────────────────────────────────
-  // Load data
-  // ────────────────────────────────────────────────
-
+  } 
   Future<void> _loadUserData() async {
     setState(() => _isLoading = true);
 
@@ -299,8 +273,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                 Expanded(
                   child: ListView(
                     controller: scrollController,
-                    children: [
-                      // Images section
+                    children: [ 
                       const Text('Images', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
                       const SizedBox(height: 12),
 
@@ -332,9 +305,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                         'Max 8 images recommended • jpg, png, webp',
                         style: TextStyle(fontSize: 12, color: Colors.grey),
                       ),
-                      const SizedBox(height: 32),
-
-                      // Form fields
+                      const SizedBox(height: 32), 
                       TextFormField(
                         controller: _editTitleController,
                         decoration: InputDecoration(
@@ -608,8 +579,7 @@ Widget _buildProfileTab() {
       child: Column(
         children: [
           const SizedBox(height: 20),
-
-          // Avatar
+ 
           Container(
             width: 120,
             height: 120,

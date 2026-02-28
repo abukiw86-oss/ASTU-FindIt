@@ -45,7 +45,6 @@ static Future<Map<String, dynamic>> register({
         'user': data['user']
       };
     } else {
-      print(response.statusCode);
       return {
         'success': false,
         'message': data['error'] ?? 'Registration failed',
@@ -76,8 +75,7 @@ static Future<Map<String, dynamic>> login({
         )
         .timeout(const Duration(seconds: 15));
     final data = jsonDecode(response.body) as Map<String, dynamic>;
-    if (response.statusCode != 200) {
-      print(response.body);
+    if (response.statusCode != 200) { 
       return {
         'success': false,
         'message': data['message'],
@@ -110,15 +108,14 @@ static Future<Map<String, dynamic>> login({
         'status': response.statusCode,
       };
     }
-  } catch (e, stack) {
-    print('Login error: $e\n$stack');
+  } catch (e) { 
     return {
       'success': false,
       'message': 'Network or login error: $e',
     };
   }
-}
-// works
+} 
+
 static Future<Map<String, dynamic>> reportlostItem({
   required String type,
   required String title,
@@ -157,8 +154,7 @@ static Future<Map<String, dynamic>> reportlostItem({
     );
 
     request.headers['Accept'] = 'application/json';
-
-    // Text fields
+ 
     request.fields.addAll({
       'type': finalType,
       'title': title.trim(),
@@ -246,13 +242,10 @@ static Future<Map<String, dynamic>> reportlostItem({
     };
   }
 }
-
-// works
+ 
 static Future<Map<String, dynamic>> getLostItems({String? userStringId}) async {
   try {
-    String url = '$baseUrl?action=get-lost-items';
-    
-    // Add user_string_id if provided
+    String url = '$baseUrl?action=get-lost-items'; 
     if (userStringId != null && userStringId.isNotEmpty) {
       url += '&user_string_id=$userStringId';
     }
@@ -271,8 +264,7 @@ static Future<Map<String, dynamic>> getLostItems({String? userStringId}) async {
     if (response.body.isEmpty) {
       return {'success': false, 'message': 'Empty response from server'};
     }
-    
-    // Handle non-200 status codes
+     
     if (response.statusCode != 200) {
       return {
         'success': false, 
@@ -281,23 +273,19 @@ static Future<Map<String, dynamic>> getLostItems({String? userStringId}) async {
     }
     
     final Map<String, dynamic> data = jsonDecode(response.body);
-    
-    // Process the items to ensure consistent format
+     
     if (data['success'] == true) {
       List<dynamic> items = data['items'] ?? [];
-      
-      // Process each item for Flutter-friendly format
+       
       List<Map<String, dynamic>> processedItems = [];
       
       for (var item in items) {
         Map<String, dynamic> processedItem = Map<String, dynamic>.from(item);
-        
-        // Handle image paths
+         
         if (processedItem.containsKey('image_path') && 
             processedItem['image_path'] != null && 
             processedItem['image_path'] != 'NULL') {
-          
-          // Convert pipe-separated string to list
+           
           String imagePath = processedItem['image_path'].toString();
           if (imagePath.contains('|')) {
             processedItem['image_list'] = imagePath.split('|')
@@ -310,16 +298,12 @@ static Future<Map<String, dynamic>> getLostItems({String? userStringId}) async {
           }
         } else {
           processedItem['image_list'] = [];
-        }
-        
-        // Ensure boolean fields
+        } 
         processedItem['is_my_item'] = processedItem['is_my_item'] == true || 
                                        processedItem['is_my_item'] == '1';
         
         processedItems.add(processedItem);
-      }
-      
-      // Return comprehensive response with all data from server
+      } 
       return {
         'success': true,
         'items': processedItems,
@@ -406,8 +390,6 @@ static Future<Map<String, dynamic>> updateItem({
         'POST',
         Uri.parse('$baseUrl?action=update-item'),
       );
-
-      // Add text fields
       request.fields['item_id'] = itemId.toString();
       request.fields['user_string_id'] = userStringId; 
       request.fields['title'] = title;
@@ -415,13 +397,11 @@ static Future<Map<String, dynamic>> updateItem({
       request.fields['location'] = location ?? '';
       request.fields['category'] = category;
 
-      // Add image if provided
       if (imageFile != null) {
         if (await imageFile.exists()) {
           var stream = http.ByteStream(imageFile.openRead());
           var length = await imageFile.length();
           
-          // Determine mime type based on file extension
           String mimeType = 'image/jpeg';
           if (imageFile.path.toLowerCase().endsWith('.png')) {
             mimeType = 'image/png';
@@ -503,7 +483,7 @@ static Future<Map<String, dynamic>> deleteItem({
         },
         body: jsonEncode({
           'item_id': itemId,
-          'user_string_id': userStringId, // Use string ID
+          'user_string_id': userStringId,
         }),
       ).timeout(
         const Duration(seconds: 30),
@@ -607,7 +587,7 @@ static Future<Map<String, dynamic>> reportFoundMatch({
     request.fields['finder_phone']        = finderPhone;
     request.fields['finder_message']      = finderMessage;
     request.fields['user_string_id']      =  userStringId ;
-    // ── Multiple images ────────────────────────────────────
+
     if (imageFiles != null && imageFiles.isNotEmpty) {
       for (var i = 0; i < imageFiles.length; i++) {
         final file = imageFiles[i];
@@ -633,8 +613,6 @@ static Future<Map<String, dynamic>> reportFoundMatch({
         }
       }
     }
-
-    // ── Send request ───────────────────────────────────────
     var streamedResponse = await request.send().timeout(
       const Duration(seconds: 45), 
       onTimeout: () => throw Exception('Upload timeout'),

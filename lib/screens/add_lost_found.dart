@@ -128,7 +128,6 @@ class _ReportItemOrMatchScreenState extends State<ReportItemOrMatchScreen> {
       return;
     }
 
-    // Match-specific required fields
     if (_isMatchMode && _foundDate == null) {
       _showSnackBar('Please select the date you found the item', Colors.orange);
       return;
@@ -214,7 +213,6 @@ class _ReportItemOrMatchScreenState extends State<ReportItemOrMatchScreen> {
   @override
   Widget build(BuildContext context) {
        AuthService.isLoggedIn();
-       print( AuthService.isLoggedIn());
     final isLost = !_isMatchMode && _reportType == 'lost';
     final primaryColor = isLost ? Colors.red : Colors.green;
 

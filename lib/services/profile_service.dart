@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'api_service.dart';
-import 'package:path/path.dart' as path; // 
+import 'package:path/path.dart' as path;
 
 class ProfileService {
   static const String baseUrl = ApiService.baseUrl;

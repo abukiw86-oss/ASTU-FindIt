@@ -142,7 +142,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   alignment: Alignment.centerRight,
                   child: TextButton(
                     onPressed: () {
-                      // TODO: Implement forgot password screen later
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(content: Text('Forgot password feature coming soon')),
                       );
@@ -160,9 +159,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       textAlign: TextAlign.center,
                     ),
                   ),
-
                 const SizedBox(height: 8),
-
                 SizedBox(
                   height: 52,
                   child: ElevatedButton(

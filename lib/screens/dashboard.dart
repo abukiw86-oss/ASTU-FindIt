@@ -343,9 +343,7 @@ Widget _buildLostItemCard(dynamic item) {
   if (rawImagePath != null && rawImagePath != 'NULL' && rawImagePath.isNotEmpty) {
     if (rawImagePath.startsWith("'") && rawImagePath.endsWith("'")) {
       rawImagePath = rawImagePath.substring(1, rawImagePath.length - 1).trim();
-    }
-
-    // Split by pipe and take the first valid path
+    } 
     final paths = rawImagePath.split('|');
     if (paths.isNotEmpty) {
       final firstPath = paths.first.trim();
@@ -365,8 +363,7 @@ Widget _buildLostItemCard(dynamic item) {
         padding: const EdgeInsets.all(12),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Image container (first image only)
+          children: [ 
             Container(
               width: 80,
               height: 80,
@@ -414,8 +411,7 @@ Widget _buildLostItemCard(dynamic item) {
                           item['title'] ?? 'No title',
                           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                         ),
-                      ),
-                      // Founder badge
+                      ), 
                       if (isFounder)
                         Container(
                           margin: const EdgeInsets.only(right: 4),
@@ -493,27 +489,21 @@ void _showLostItemDetails(dynamic item) {
       minChildSize: 0.5,
       maxChildSize: 0.95,
       expand: false,
-      builder: (context, scrollController) {
-        // ── Parse pipe-separated image paths ─────────────────────────────────
+      builder: (context, scrollController) { 
         List<String> imageUrls = [];
 
         var rawPath = item['image_path']?.toString()?.trim();
 
-        if (rawPath != null && rawPath != 'NULL' && rawPath.isNotEmpty) {
-          // Remove wrapping single quotes if present (from DB)
+        if (rawPath != null && rawPath != 'NULL' && rawPath.isNotEmpty) { 
           if (rawPath.startsWith("'") && rawPath.endsWith("'")) {
             rawPath = rawPath.substring(1, rawPath.length - 1).trim();
-          }
-
-          // Split by pipe and generate URLs
+          } 
           final paths = rawPath.split('|');
           imageUrls = paths.map<String>((String p) {
             final cleanPath = p.trim();
             return _getImageUrl(cleanPath);
           }).where((url) => url.isNotEmpty).toList();
-        }
-
-        // Page controller for arrows
+        } 
         final _pageController = PageController();
 
         return Container(
@@ -524,8 +514,7 @@ void _showLostItemDetails(dynamic item) {
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Drag handle
+            children: [ 
               Center(
                 child: Container(
                   width: 40,
@@ -596,8 +585,7 @@ void _showLostItemDetails(dynamic item) {
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
-                              children: [
-                                // Previous button
+                              children: [ 
                                 IconButton(
                                   icon: const Icon(Icons.arrow_left, color: Colors.white),
                                   onPressed: () {
@@ -638,8 +626,7 @@ void _showLostItemDetails(dynamic item) {
                 ),
 
               const SizedBox(height: 20),
-
-              // Item type badge
+ 
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
@@ -813,24 +800,20 @@ Widget _buildFoundItemCard(dynamic item) {
                          requestStatus[itemId] == 'pending');
   
   final bool isRejected = !isFounder && requestStatus[itemId] == 'rejected';
-
-  // ── Parse first image from pipe-separated paths ─────────────────────────
+ 
   String? firstImageUrl;
   int imageCount = 0;
   
   var rawImagePath = item['image_path']?.toString()?.trim();
 
   if (rawImagePath != null && rawImagePath != 'NULL' && rawImagePath != 'null' && rawImagePath.isNotEmpty) {
-    // Remove wrapping single quotes if present (from DB)
+ 
     if (rawImagePath.startsWith("'") && rawImagePath.endsWith("'")) {
       rawImagePath = rawImagePath.substring(1, rawImagePath.length - 1).trim();
-    }
-
-    // Split by pipe
+    } 
     final paths = rawImagePath.split('|');
     imageCount = paths.length;
-    
-    // Get first valid image path
+     
     if (paths.isNotEmpty) {
       final firstPath = paths.first.trim();
       if (firstPath.isNotEmpty && firstPath != 'NULL' && firstPath != 'null') {
@@ -862,8 +845,7 @@ Widget _buildFoundItemCard(dynamic item) {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Stack(
-              children: [
-                // Image container
+              children: [ 
                 Container(
                   width: 80,
                   height: 80,
@@ -914,9 +896,7 @@ Widget _buildFoundItemCard(dynamic item) {
                             ),
                           ],
                         ),
-                ),
-                
-                // Image count badge (if multiple images)
+                ), 
                 if (imageCount > 1 && hasApproved)
                   Positioned(
                     top: 4,
@@ -940,8 +920,7 @@ Widget _buildFoundItemCard(dynamic item) {
                       ),
                     ),
                   ),
-                
-                // Blur overlay for restricted items
+                 
                 if (!hasApproved && !isFounder)
                   Positioned.fill(
                     child: ClipRRect(
@@ -954,8 +933,7 @@ Widget _buildFoundItemCard(dynamic item) {
                       ),
                     ),
                   ),
-                
-                // Lock/Block overlay for restricted items
+                 
                 if (!hasApproved && !isFounder)
                   Positioned.fill(
                     child: Container(
@@ -973,7 +951,6 @@ Widget _buildFoundItemCard(dynamic item) {
                     ),
                   ),
                 
-                // Checkmark for approved access
                 if (hasApproved)
                   const Positioned(
                     top: 4,
@@ -985,7 +962,6 @@ Widget _buildFoundItemCard(dynamic item) {
                     ),
                   ),
 
-                // Founder badge
                 if (isFounder)
                   const Positioned(
                     top: 4,
@@ -1036,8 +1012,7 @@ Widget _buildFoundItemCard(dynamic item) {
                             ),
                           ),
                         ),
-                      
-                      // Status badge
+                       
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
@@ -1081,8 +1056,7 @@ Widget _buildFoundItemCard(dynamic item) {
                   ),
                   
                   const SizedBox(height: 4),
-                  
-                  // Location
+                   
                   Row(
                     children: [
                       Icon(Icons.location_on, size: 14, color: Colors.grey[500]),
@@ -1098,7 +1072,6 @@ Widget _buildFoundItemCard(dynamic item) {
                     ],
                   ),
                   
-                  // Description (only for approved access)
                   if (hasApproved) ...[
                     const SizedBox(height: 8),
                     Text(
@@ -1118,7 +1091,6 @@ Widget _buildFoundItemCard(dynamic item) {
                   
                   const SizedBox(height: 8),
                   
-                  // Founder info
                   if (isFounder)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
