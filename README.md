@@ -4,6 +4,8 @@ A cross-platform **Flutter mobile application** for ASTU FindIt — a campus los
 
 ---
 
+## You can try download from Releases .
+
 ## 🚀 Overview
 
 **ASTU-FindIt** is a mobile app built using **Flutter** that works on Android and iOS. It connects with the **ASTU-FindIt_api** backend to:
