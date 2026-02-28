@@ -1,12 +1,13 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
+
 import '../services/auth_service.dart';
 import '../services/profile_service.dart';
-import '../services/api_service.dart';
 import 'login.dart';
-import 'add_lost_found.dart';
-import 'package:intl/intl.dart';
-import 'dart:io';
-import 'package:image_picker/image_picker.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -15,28 +16,34 @@ class ProfileScreen extends StatefulWidget {
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen>
-    with SingleTickerProviderStateMixin {
+class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  
+
   Map<String, dynamic>? _user;
   List<dynamic> _history = [];
+
   bool _isLoading = true;
-  bool _isEditing = false;
-  int? _editingItemId; 
-  
+  bool _isEditingProfile = false;
+  bool _isSavingItem = false;
+
+  // Profile editing
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
-  
-  // Edit item controllers
+
+  // Item editing
+  String? _editingItemId;
   final _editTitleController = TextEditingController();
   final _editDescriptionController = TextEditingController();
   final _editLocationController = TextEditingController();
   String _editCategory = 'electronics';
-  File? _editSelectedImage;
+
+  List<String> _currentImagePaths = [];
+  List<XFile> _newImages = [];
+  List<String> _removedImagePaths = [];
+
   final ImagePicker _picker = ImagePicker();
 
-  // Predefined categories list
+  // Categories
   final List<Map<String, dynamic>> _categories = [
     {'value': 'electronics', 'label': '📱 Electronics', 'icon': Icons.phone_android},
     {'value': 'clothing', 'label': '👕 Clothing', 'icon': Icons.checkroom},
@@ -73,118 +80,181 @@ class _ProfileScreenState extends State<ProfileScreen>
     super.dispose();
   }
 
+  // ────────────────────────────────────────────────
+  // Load data
+  // ────────────────────────────────────────────────
+
   Future<void> _loadUserData() async {
+    setState(() => _isLoading = true);
+
     try {
       final user = await AuthService.getUser();
-      if (user != null && mounted) {
+      if (user == null) {
+        if (mounted) {
+          Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
+        }
+        return;
+      }
+
+      if (mounted) {
         setState(() {
           _user = user;
           _nameController.text = user['full_name'] ?? '';
           _phoneController.text = user['phone'] ?? '';
         });
         await _loadUserHistory();
-      } else {
-        if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => const LoginScreen()),
-          );
-        }
       }
     } catch (e) {
-      if (mounted) {
-        _showSnackBar('Error loading profile', Colors.red);
-      }
+      if (mounted) _showSnackBar('Error loading profile', Colors.red);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _loadUserHistory() async {
-    if (_user == null || !mounted) return;
-
-    setState(() => _isLoading = true);
+    if (_user == null) return;
 
     try {
       final result = await ProfileService.getUserHistory(
-        userId: _user!['user_string_id'], // Make sure this matches your API parameter name
+        userId: _user!['user_string_id'] as String,
       );
 
-      if (mounted) {
-        if (result['success'] == true) {
-          setState(() {
-            _history = result['history'] ?? [];
-            _isLoading = false;
-          });
-        } else {
-          setState(() => _isLoading = false);
-          _showSnackBar(result['message'] ?? 'Failed to load history', Colors.orange);
-        }
+      if (mounted && result['success'] == true) {
+        setState(() {
+          _history = result['history'] ?? [];
+        });
       }
     } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        _showSnackBar('Error loading history', Colors.red);
-      }
+      if (mounted) _showSnackBar('Failed to load history', Colors.orange);
     }
   }
 
+  // ────────────────────────────────────────────────
+  // Profile update
+  // ────────────────────────────────────────────────
+
   Future<void> _updateProfile() async {
-    if (_user == null || !mounted) return;
+    if (_user == null) return;
 
     setState(() => _isLoading = true);
 
     try {
       final result = await ProfileService.updateUserProfile(
-        userId: _user!['user_string_id'], 
+        userId: _user!['user_string_id'] as String,
         fullName: _nameController.text.trim(),
         phone: _phoneController.text.trim(),
       );
 
-      if (mounted) {
-        if (result['success'] == true) {
-          setState(() {
-            _user!['full_name'] = _nameController.text;
-            _user!['phone'] = _phoneController.text;
-            _isEditing = false;
-            _isLoading = false;
-          });
-          
-          // Update local storage
-          await AuthService.saveUser(
-            userStringId: _user!['user_string_id'],
-            email: _user!['email'],
-            fullName: _nameController.text,
-            phone: _phoneController.text,
-            role: _user!['role'],
-          );
+      if (!mounted) return;
 
-          _showSnackBar('Profile updated successfully', Colors.green);
-        } else {
-          setState(() => _isLoading = false);
-          _showSnackBar(result['message'] ?? 'Failed to update profile', Colors.red);
-        }
+      if (result['success'] == true) {
+        setState(() {
+          _user!['full_name'] = _nameController.text.trim();
+          _user!['phone'] = _phoneController.text.trim();
+          _isEditingProfile = false;
+        });
+
+        await AuthService.saveUser(
+          userStringId: _user!['user_string_id'],
+          email: _user!['email'],
+          fullName: _nameController.text.trim(),
+          phone: _phoneController.text.trim(),
+          role: _user!['role'],
+        );
+
+        _showSnackBar('Profile updated', Colors.green);
+      } else {
+        _showSnackBar(result['message'] ?? 'Update failed', Colors.red);
       }
     } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        _showSnackBar('Error updating profile', Colors.red);
-      }
+      _showSnackBar('Error: $e', Colors.red);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   void _startEditing(dynamic item) {
+    final string_id = item['item_string_id']?.toString();
+    if (string_id == null) return;
+
     setState(() {
-      _editingItemId = int.parse(item['id'].toString());
+      _editingItemId = string_id;
       _editTitleController.text = item['title'] ?? '';
       _editDescriptionController.text = item['description'] ?? '';
       _editLocationController.text = item['location'] ?? '';
-      _editCategory = item['category'] ?? 'electronics';
-      _editSelectedImage = null;
+      _editCategory = item['category'] ?? 'other';
+
+      _currentImagePaths = _parseImagePaths(item['image_path']);
+      _newImages = [];
+      _removedImagePaths = [];
     });
-    
-    _showEditBottomSheet(item);
+
+    _showEditBottomSheet();
   }
 
-  void _showEditBottomSheet(dynamic item) {
+  Future<void> _pickEditImages() async {
+    try {
+      final List<XFile>? images = await _picker.pickMultiImage(
+        imageQuality: 85,
+        maxWidth: 1200,
+      );
+
+      if (images != null && images.isNotEmpty && mounted) {
+        setState(() => _newImages.addAll(images));
+      }
+    } catch (e) {
+      _showSnackBar('Error picking images: $e', Colors.red);
+    }
+  }
+
+  void _removeExistingImage(String path) {
+    setState(() {
+      _currentImagePaths.remove(path);
+      _removedImagePaths.add(path);
+    });
+  }
+
+  void _removeNewImage(int index) {
+    setState(() => _newImages.removeAt(index));
+  }
+
+  Future<void> _saveItemChanges() async {
+    if (_editingItemId == null) return;
+
+    final title = _editTitleController.text.trim();
+    if (title.isEmpty) {
+      _showSnackBar('Title is required', Colors.orange);
+      return;
+    }
+    setState(() => _isSavingItem = true);
+    try {
+      final result = await ProfileService.updateItem( 
+        itemId: _editingItemId!,
+        userStringId: await AuthService.getUserStringId() ?? '',
+        title: title,
+        description: _editDescriptionController.text.trim(),
+        location: _editLocationController.text.trim(),
+        category: _editCategory,
+        keptImagePaths: _currentImagePaths,
+        removedImagePaths: _removedImagePaths,
+        newImages: _newImages.map((xfile) => File(xfile.path)).toList(),
+      );
+      if (!mounted) return;
+      if (result['success'] == true) {
+        _showSnackBar('Item updated successfully', Colors.green);
+        Navigator.pop(context); 
+        await _loadUserHistory(); 
+      } else {
+        _showSnackBar(result['message'] ?? 'Update failed', Colors.red);
+      }
+    } catch (e) {
+      _showSnackBar('Failed to save: $e', Colors.red);
+    } finally {
+      if (mounted) setState(() => _isSavingItem = false);
+    }
+  }
+
+  void _showEditBottomSheet() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -192,215 +262,121 @@ class _ProfileScreenState extends State<ProfileScreen>
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.9,
+        initialChildSize: 0.92,
         minChildSize: 0.5,
-        maxChildSize: 0.95,
+        maxChildSize: 0.96,
         expand: false,
         builder: (context, scrollController) {
           return Container(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
             decoration: const BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
             ),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Center(
                   child: Container(
                     width: 40,
-                    height: 4,
+                    height: 5,
                     decoration: BoxDecoration(
-                      color: Colors.grey[300],
-                      borderRadius: BorderRadius.circular(2),
+                      color: Colors.grey[350],
+                      borderRadius: BorderRadius.circular(4),
                     ),
                   ),
                 ),
-                const SizedBox(height: 20),
-                
+                const SizedBox(height: 16),
+
                 Row(
                   children: [
-                    Icon(Icons.edit, color: Colors.blue[700]),
-                    const SizedBox(width: 8),
+                    Icon(Icons.edit, color: Colors.blue[700], size: 28),
+                    const SizedBox(width: 12),
                     Text(
                       'Edit Item',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.blue[700],
-                      ),
+                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.blue[800]),
                     ),
                   ],
                 ),
-                
-                const SizedBox(height: 20),
-                
+                const SizedBox(height: 24),
+
                 Expanded(
                   child: ListView(
                     controller: scrollController,
                     children: [
-                      // Current image preview
-                      if (item['image_path'] != null)
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('Current Image:', style: TextStyle(fontWeight: FontWeight.bold)),
-                            const SizedBox(height: 8),
-                            Container(
-                              height: 150,
-                              width: double.infinity,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(12),
-                                image: DecorationImage(
-                                  image: NetworkImage(_getImageUrl(item['image_path'])),
-                                  fit: BoxFit.cover,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      
-                      const SizedBox(height: 16),
-                      
-                      // New image picker
-                      const Text('Change Image (optional):', style: TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 8),
-                      Container(
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey[300]!),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: ListTile(
-                          leading: const Icon(Icons.photo_library),
-                          title: Text(_editSelectedImage == null 
-                              ? 'Tap to select new image' 
-                              : 'New image selected'),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (_editSelectedImage != null)
-                                IconButton(
-                                  icon: const Icon(Icons.delete, color: Colors.red),
-                                  onPressed: _removeEditImage,
-                                ),
-                              IconButton(
-                                icon: const Icon(Icons.add_photo_alternate),
-                                onPressed: _pickEditImage,
-                              ),
-                            ],
-                          ),
+                      // Images section
+                      const Text('Images', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 12),
+
+                      if (_currentImagePaths.isNotEmpty) ...[
+                        const Text('Current images', style: TextStyle(color: Colors.grey, fontSize: 13)),
+                        const SizedBox(height: 8),
+                        _buildImageList(_currentImagePaths, isNew: false),
+                        const SizedBox(height: 20),
+                      ],
+
+                      if (_newImages.isNotEmpty) ...[
+                        const Text('New images', style: TextStyle(color: Colors.grey, fontSize: 13)),
+                        const SizedBox(height: 8),
+                        _buildImageList(_newImages.map((e) => e.path).toList(), isNew: true),
+                        const SizedBox(height: 20),
+                      ],
+
+                      OutlinedButton.icon(
+                        onPressed: _pickEditImages,
+                        icon: const Icon(Icons.add_photo_alternate),
+                        label: Text(_newImages.isEmpty ? 'Add images' : 'Add more'),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(52),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
                       ),
-                      
-                      if (_editSelectedImage != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: Image.file(
-                              _editSelectedImage!,
-                              height: 100,
-                              width: double.infinity,
-                              fit: BoxFit.cover,
-                            ),
-                          ),
-                        ),
-                      
-                      const SizedBox(height: 20),
-                      
-                      // Title field
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Max 8 images recommended • jpg, png, webp',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                      const SizedBox(height: 32),
+
+                      // Form fields
                       TextFormField(
                         controller: _editTitleController,
                         decoration: InputDecoration(
-                          labelText: 'Title',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                          labelText: 'Title *',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                           prefixIcon: const Icon(Icons.title),
                         ),
                       ),
-                      
                       const SizedBox(height: 16),
-                      
-                      // Description field
+
                       TextFormField(
                         controller: _editDescriptionController,
-                        maxLines: 3,
+                        maxLines: 4,
                         decoration: InputDecoration(
                           labelText: 'Description',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                           prefixIcon: const Icon(Icons.description),
+                          alignLabelWithHint: true,
                         ),
                       ),
-                      
                       const SizedBox(height: 16),
-                      
-                      // Location field
+
                       TextFormField(
                         controller: _editLocationController,
                         decoration: InputDecoration(
                           labelText: 'Location',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                           prefixIcon: const Icon(Icons.location_on),
                         ),
                       ),
-                      
-                      const SizedBox(height: 16),
-                      
-                      // Category dropdown
-                      const Text('Category', style: TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 8),
-                      Container(
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey[300]!),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: DropdownButtonFormField<String>(
-                          value: _editCategory,
-                          decoration: const InputDecoration(
-                            border: InputBorder.none,
-                            contentPadding: EdgeInsets.symmetric(horizontal: 16),
-                          ),
-                          icon: const Icon(Icons.arrow_drop_down),
-                          elevation: 16,
-                          style: const TextStyle(color: Colors.black, fontSize: 16),
-                          onChanged: (String? newValue) {
-                            setState(() {
-                              _editCategory = newValue!;
-                            });
-                          },
-                          items: _categories.map<DropdownMenuItem<String>>((Map<String, dynamic> category) {
-                            return DropdownMenuItem<String>(
-                              value: category['value'],
-                              child: Row(
-                                children: [
-                                  Icon(category['icon'], size: 20, color: Colors.grey[700]),
-                                  const SizedBox(width: 12),
-                                  Text(category['label']),
-                                ],
-                              ),
-                            );
-                          }).toList(),
-                        ),
-                      ),
-                      
-                      const SizedBox(height: 30),
-                      
-                      // Action buttons
+                      const SizedBox(height: 24),
                       Row(
                         children: [
                           Expanded(
                             child: OutlinedButton(
                               onPressed: () => Navigator.pop(context),
                               style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                               ),
                               child: const Text('Cancel'),
                             ),
@@ -408,16 +384,20 @@ class _ProfileScreenState extends State<ProfileScreen>
                           const SizedBox(width: 12),
                           Expanded(
                             child: ElevatedButton(
-                              onPressed: () => _saveItemChanges(int.parse(item['id'].toString())),
+                              onPressed: _isSavingItem ? null : _saveItemChanges,
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.green,
+                                backgroundColor: Colors.green[700],
                                 foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                               ),
-                              child: const Text('Save Changes'),
+                              child: _isSavingItem
+                                  ? const SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                                    )
+                                  : const Text('Save Changes'),
                             ),
                           ),
                         ],
@@ -433,212 +413,172 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
   }
 
-  Future<void> _pickEditImage() async {
-    try {
-      final XFile? pickedFile = await _picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 1024,
-        maxHeight: 1024,
-        imageQuality: 70,
-      );
-
-      if (pickedFile != null) {
-        final file = File(pickedFile.path);
-        final fileSize = await file.length();
-        
-        if (fileSize > 5 * 1024 * 1024) {
-          _showSnackBar('Image too large (max 5MB)', Colors.red);
-          return;
-        }
-
-        if (await file.exists()) {
-          setState(() {
-            _editSelectedImage = file;
-          });
-        }
-      }
-    } catch (e) {
-      _showSnackBar('Error picking image: $e', Colors.red);
-    }
+  Widget _buildImageList(List<String> paths, {required bool isNew}) {
+    return SizedBox(
+      height: 110,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        itemCount: paths.length,
+        itemBuilder: (context, index) {
+          final path = paths[index];
+          return Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Stack(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: isNew
+                      ? Image.file(
+                          File(path),
+                          width: 110,
+                          height: 110,
+                          fit: BoxFit.cover,
+                        )
+                      : Image.network(
+                          _getImageUrl(path),
+                          width: 110,
+                          height: 110,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Container(
+                            color: Colors.grey[300],
+                            child: const Icon(Icons.broken_image, color: Colors.grey),
+                          ),
+                        ),
+                ),
+                Positioned(
+                  top: 6,
+                  right: 6,
+                  child: GestureDetector(
+                    onTap: () {
+                      if (isNew) {
+                        _removeNewImage(index);
+                      } else {
+                        _removeExistingImage(path);
+                      }
+                    },
+                    child: CircleAvatar(
+                      radius: 14,
+                      backgroundColor: Colors.redAccent,
+                      child: const Icon(Icons.close, size: 18, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 
-  void _removeEditImage() {
-    setState(() {
-      _editSelectedImage = null;
-    });
-  }
-
-  Future<void> _saveItemChanges(int itemId) async {
-    if (_editTitleController.text.isEmpty) {
-      _showSnackBar('Title is required', Colors.red);
-      return;
-    }
-
-    setState(() => _isLoading = true);
-    Navigator.pop(context); // Close bottom sheet
-
-    try {
-      final result = await ApiService.updateItem(
-        itemId: itemId,
-        title: _editTitleController.text.trim(),
-        description: _editDescriptionController.text.trim(),
-        location: _editLocationController.text.trim(),
-        category: _editCategory,
-        imageFile: _editSelectedImage,
-        userStringId: _user!['user_string_id'],
-      );
-
-      if (mounted) {
-        if (result['success'] == true) {
-          _showSnackBar('Item updated successfully', Colors.green);
-          await _loadUserHistory(); // Refresh history
-        } else {
-          _showSnackBar(result['message'] ?? 'Failed to update item', Colors.red);
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        _showSnackBar('Error: $e', Colors.red);
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _editingItemId = null;
-        });
-      }
-    }
-  }
-
-  // ==================== ITEM DELETE FUNCTIONS ====================
-
-  Future<void> _confirmDeleteItem(int itemId, String title) async {
-    showDialog(
+  Future<void> _confirmDeleteItem(String itemId, String title) async {
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete Item'),
-        content: Text('Are you sure you want to delete "$title"? This action cannot be undone.'),
+        content: Text('Delete "$title" permanently?'),
         actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _deleteItem(itemId);
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Delete'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
     );
-  }
 
-  Future<void> _deleteItem(int itemId) async {
-    setState(() => _isLoading = true);
-
-    try {
-      final result = await ApiService.deleteItem(
-        itemId: itemId,
-        userStringId: _user!['user_string_id'],
-      );
-
-      if (mounted) {
-        if (result['success'] == true) {
-          _showSnackBar('Item deleted successfully', Colors.green);
-          await _loadUserHistory(); // Refresh history
-        } else {
-          _showSnackBar(result['message'] ?? 'Failed to delete item', Colors.red);
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        _showSnackBar('Error: $e', Colors.red);
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+    if (confirmed == true) {
+      await _deleteItem(itemId);
     }
   }
 
-  // ==================== HELPER FUNCTIONS ====================
+Future<void> _deleteItem(String itemId) async {
+    setState(() => _isLoading = true);
 
-  void _showSnackBar(String message, Color color) {
+    try {
+      final result = await ProfileService.deleteItem(
+        itemId: itemId,
+        userId: _user?['user_string_id'] ?? '',
+      );
+
+      if (result['success'] == true) {
+        _showSnackBar('Item deleted', Colors.green);
+        await _loadUserHistory();
+      } else {
+        _showSnackBar(result['message'] ?? 'Delete failed', Colors.red);
+      }
+    } catch (e) {
+      _showSnackBar('Error: $e', Colors.red);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+void _showSnackBar(String message, Color bgColor) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: color,
-        duration: const Duration(seconds: 2),
-      ),
+      SnackBar(content: Text(message), backgroundColor: bgColor, duration: const Duration(seconds: 3)),
     );
   }
 
-  String _getImageUrl(String? path) {
+String _getImageUrl(String? path) {
     if (path == null || path.isEmpty) return '';
     if (path.startsWith('http')) return path;
     return 'https://astufindit.x10.mx/index/$path';
   }
 
-  String _getStatusColor(String status) {
-    switch (status) {
-      case 'approved':
-      case 'resolved':
-        return '🟢';
-      case 'pending':
-        return '🟡';
-      case 'rejected':
-        return '🔴';
-      default:
-        return '⚪';
+List<String> _parseImagePaths(dynamic imagePath) {
+    if (imagePath == null) return [];
+
+    String str = imagePath.toString().trim();
+
+    if (str.startsWith("'") && str.endsWith("'")) {
+      str = str.substring(1, str.length - 1);
     }
+
+    if (str.isEmpty || str == 'NULL' || str == 'null') return [];
+
+    return str.split('|').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
   }
 
-  String _formatDate(String? dateString) {
-    if (dateString == null) return 'Unknown';
+String _formatDate(String? dateStr) {
+    if (dateStr == null || dateStr.isEmpty) return '—';
     try {
-      final date = DateTime.parse(dateString);
+      final date = DateTime.parse(dateStr);
       return DateFormat('MMM dd, yyyy').format(date);
-    } catch (e) {
-      return dateString;
+    } catch (_) {
+      return dateStr;
     }
   }
 
-  bool _canEditItem(dynamic item) {
-    // Can edit if item is pending and user is the reporter
-    return item['status'] == 'pending' && item['history_type'] == 'reported';
+bool _canEditItem(dynamic item) {
+    final status = (item['status'] ?? '').toString().toLowerCase();
+    final isOwner = item['user_string_id'] == (_user?['user_string_id'] ?? '');
+    return isOwner && status == 'open' || status == 'admin_approval' ;
   }
-
   @override
-  Widget build(BuildContext context) {
-    if (_user == null && !_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+Widget build(BuildContext context) {
+    if (_isLoading && _user == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('My Profile'),
         actions: [
-          if (!_isEditing)
+          if (!_isEditingProfile)
             IconButton(
               icon: const Icon(Icons.edit),
-              onPressed: () => setState(() => _isEditing = true),
+              onPressed: () => setState(() => _isEditingProfile = true),
             ),
-          if (_isEditing)
+          if (_isEditingProfile)
             IconButton(
               icon: const Icon(Icons.close),
               onPressed: () {
                 setState(() {
-                  _isEditing = false;
-                  _nameController.text = _user!['full_name'];
-                  _phoneController.text = _user!['phone'] ?? '';
+                  _isEditingProfile = false;
+                  _nameController.text = _user?['full_name'] ?? '';
+                  _phoneController.text = _user?['phone'] ?? '';
                 });
               },
             ),
@@ -663,128 +603,86 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
   }
 
-  Widget _buildProfileTab() {
+Widget _buildProfileTab() {
+    if (_user == null) return const SizedBox();
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
         children: [
           const SizedBox(height: 20),
-          
+
           // Avatar
           Container(
             width: 120,
             height: 120,
             decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Colors.blue, Colors.purple],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
+              gradient: const LinearGradient(colors: [Colors.blue, Colors.purple]),
               shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.blue.withOpacity(0.3),
-                  blurRadius: 15,
-                  offset: const Offset(0, 5),
-                ),
-              ],
+              boxShadow: [BoxShadow(color: Colors.blue.withOpacity(0.3), blurRadius: 15)],
             ),
             child: Center(
               child: Text(
-                _user!['full_name'][0].toUpperCase(),
-                style: const TextStyle(
-                  fontSize: 48,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
+                (_user!['full_name']?[0] ?? '?').toUpperCase(),
+                style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: Colors.white),
               ),
             ),
           ),
-          
-          const SizedBox(height: 20),
-          
-          // Profile Info
+
+          const SizedBox(height: 24),
+
           Card(
             elevation: 2,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(15),
-            ),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             child: Padding(
               padding: const EdgeInsets.all(20),
               child: Column(
                 children: [
-                  // Email (read-only)
                   TextFormField(
                     initialValue: _user!['email'],
                     readOnly: true,
                     decoration: InputDecoration(
                       labelText: 'Email',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                       prefixIcon: const Icon(Icons.email),
                     ),
                   ),
-                  
                   const SizedBox(height: 16),
-                  
-                  // Name (editable)
+
                   TextFormField(
                     controller: _nameController,
-                    readOnly: !_isEditing,
+                    readOnly: !_isEditingProfile,
                     decoration: InputDecoration(
                       labelText: 'Full Name',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                       prefixIcon: const Icon(Icons.person),
-                      suffixIcon: _isEditing
-                          ? IconButton(
-                              icon: const Icon(Icons.clear),
-                              onPressed: () => _nameController.clear(),
-                            )
-                          : const Icon(Icons.lock, size: 16, color: Colors.grey),
                     ),
                   ),
-                  
                   const SizedBox(height: 16),
-                  
-                  // Phone (editable)
+
                   TextFormField(
                     controller: _phoneController,
-                    readOnly: !_isEditing,
+                    readOnly: !_isEditingProfile,
                     decoration: InputDecoration(
                       labelText: 'Phone Number',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                       prefixIcon: const Icon(Icons.phone),
-                      suffixIcon: _isEditing
-                          ? IconButton(
-                              icon: const Icon(Icons.clear),
-                              onPressed: () => _phoneController.clear(),
-                            )
-                          : const Icon(Icons.lock, size: 16, color: Colors.grey),
                     ),
+                    keyboardType: TextInputType.phone,
                   ),
-                  
-                  const SizedBox(height: 20),
-                  
-                  // Save button when editing
-                  if (_isEditing)
+                  const SizedBox(height: 24),
+
+                  if (_isEditingProfile)
                     SizedBox(
                       width: double.infinity,
-                      height: 50,
+                      height: 52,
                       child: ElevatedButton.icon(
                         onPressed: _updateProfile,
                         icon: const Icon(Icons.save),
-                        label: const Text('Save Changes'),
+                        label: const Text('Save Profile'),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
+                          backgroundColor: Colors.green[700],
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
                       ),
                     ),
@@ -792,80 +690,22 @@ class _ProfileScreenState extends State<ProfileScreen>
               ),
             ),
           ),
-          
-          const SizedBox(height: 20),
-          
-          // Stats Card
-          Card(
-            elevation: 2,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(15),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                children: [
-                  const Text(
-                    'Your Activity',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: [
-                      _buildStatItem(
-                        'Items Reported',
-                        _history.where((item) => item['history_type'] == 'reported').length.toString(),
-                        Icons.report,
-                        Colors.blue,
-                      ),
-                      _buildStatItem(
-                        'Claims Made',
-                        _history.where((item) => item['history_type'] == 'claimed').length.toString(),
-                        Icons.handshake,
-                        Colors.orange,
-                      ),
-                      _buildStatItem(
-                        'Resolved',
-                        _history.where((item) => item['status'] == 'resolved').length.toString(),
-                        Icons.check_circle,
-                        Colors.green,
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          
-          const SizedBox(height: 20),
-          
-          // Logout Button
+
+          const SizedBox(height: 24),
+
           SizedBox(
             width: double.infinity,
-            height: 50,
+            height: 52,
             child: OutlinedButton.icon(
               onPressed: () async {
                 await AuthService.logout();
-                if (!mounted) return;
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (_) => const LoginScreen()),
-                );
+                if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
               },
               icon: const Icon(Icons.logout, color: Colors.red),
-              label: const Text(
-                'Logout',
-                style: TextStyle(color: Colors.red),
-              ),
+              label: const Text('Logout', style: TextStyle(color: Colors.red)),
               style: OutlinedButton.styleFrom(
                 side: const BorderSide(color: Colors.red),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
             ),
           ),
@@ -874,41 +714,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
   }
 
-  Widget _buildStatItem(String label, String value, IconData icon, Color color) {
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, color: color),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            color: Colors.grey[600],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildHistoryTab() {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
+Widget _buildHistoryTab() {
     if (_history.isEmpty) {
       return Center(
         child: Column(
@@ -916,241 +722,96 @@ class _ProfileScreenState extends State<ProfileScreen>
           children: [
             Icon(Icons.history, size: 80, color: Colors.grey[400]),
             const SizedBox(height: 16),
-            Text(
-              'No history yet',
-              style: TextStyle(fontSize: 18, color: Colors.grey[600]),
-            ),
+            const Text('No history yet', style: TextStyle(fontSize: 18, color: Colors.grey)),
             const SizedBox(height: 8),
-            Text(
-              'Your reported items and claims will appear here',
-              style: TextStyle(fontSize: 14, color: Colors.grey[500]),
-              textAlign: TextAlign.center,
-            ),
+            const Text('Your reported and claimed items will appear here', style: TextStyle(color: Colors.grey)),
           ],
         ),
       );
     }
 
     return ListView.builder(
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.all(12),
       itemCount: _history.length,
       itemBuilder: (context, index) {
         final item = _history[index];
-        final isReported = item['history_type'] == 'reported';
         final isLost = item['type'] == 'lost';
         final canEdit = _canEditItem(item);
-        
+        final images = _parseImagePaths(item['image_path']);
+
         return Card(
-          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+          margin: const EdgeInsets.symmetric(vertical: 8),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           child: Column(
             children: [
               ListTile(
                 leading: CircleAvatar(
                   backgroundColor: isLost ? Colors.red[100] : Colors.green[100],
-                  child: Icon(
-                    isLost ? Icons.search_off : Icons.check_circle,
-                    color: isLost ? Colors.red : Colors.green,
-                  ),
+                  child: Icon(isLost ? Icons.search_off : Icons.check_circle, color: isLost ? Colors.red : Colors.green),
                 ),
-                title: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        item['title'] ?? '',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: item['status'] == 'resolved'
-                            ? Colors.green.withOpacity(0.1)
-                            : item['status'] == 'pending'
-                                ? Colors.orange.withOpacity(0.1)
-                                : item['status'] == 'approved'
-                                    ? Colors.blue.withOpacity(0.1)
-                                    : Colors.grey.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        '${_getStatusColor(item['status'])} ${item['status']?.toUpperCase() ?? ''}',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: item['status'] == 'resolved'
-                              ? Colors.green
-                              : item['status'] == 'pending'
-                                  ? Colors.orange
-                                  : item['status'] == 'approved'
-                                      ? Colors.blue
-                                      : Colors.grey,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                title: Text(item['title'] ?? 'No title', style: const TextStyle(fontWeight: FontWeight.bold)),
                 subtitle: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Text(item['description'] ?? '', maxLines: 2, overflow: TextOverflow.ellipsis),
                     const SizedBox(height: 4),
-                    Text(
-                      item['description'] ?? '',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    Text(_formatDate(item['created_at']), style: const TextStyle(fontSize: 12, color: Colors.grey)),
                     const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Icon(
-                          isReported ? Icons.report : Icons.handshake,
-                          size: 12,
-                          color: Colors.grey,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          isReported ? 'You reported this' : 'You claimed this',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Icon(Icons.calendar_today, size: 12, color: Colors.grey),
-                        const SizedBox(width: 4),
-                        Text(
-                          _formatDate(item['created_at']),
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (item['image_path'] != null && isReported) ...[
-                      const SizedBox(height: 8),
-                      GestureDetector(
-                        onTap: () => _showFullScreenImage(item['image_path']),
-                        child: Container(
-                          height: 100,
-                          width: double.infinity,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(8),
-                            image: DecorationImage(
-                              image: NetworkImage(_getImageUrl(item['image_path'])),
-                              fit: BoxFit.cover,
-                            ),
+                    Text('Status - ${item['status']}', style: const TextStyle(fontWeight: FontWeight.bold))
+                  ],
+                ),
+              ),
+              if (images.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: SizedBox(
+                    height: 90,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: images.length,
+                      itemBuilder: (context, i) => Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Image.network(
+                            _getImageUrl(images[i]),
+                            width: 90,
+                            height: 90,
+                            fit: BoxFit.cover,
                           ),
                         ),
                       ),
-                    ],
-                  ],
+                    ),
+                  ),
                 ),
-                isThreeLine: true,
-              ),
-              
-              // Edit/Delete buttons for reported items that are pending
-              if (isReported && canEdit)
+
+              if (canEdit)
                 Padding(
-                  padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
+                  padding: const EdgeInsets.all(12),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       TextButton.icon(
                         onPressed: () => _startEditing(item),
-                        icon: const Icon(Icons.edit, size: 16),
+                        icon: const Icon(Icons.edit, size: 18),
                         label: const Text('Edit'),
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.blue,
-                        ),
                       ),
                       const SizedBox(width: 8),
                       TextButton.icon(
-                        onPressed: () => _confirmDeleteItem(int.parse(item['id'].toString()), item['title']),
-                        icon: const Icon(Icons.delete, size: 16),
-                        label: const Text('Delete'),
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.red,
+                        onPressed: () => _confirmDeleteItem(
+                          item['item_string_id'].toString(),
+                          item['title'] ?? 'this item',
                         ),
+                        icon: const Icon(Icons.delete, size: 18, color: Colors.red),
+                        label: const Text('Delete', style: TextStyle(color: Colors.red)),
                       ),
                     ],
-                  ),
-                ),
-              
-              // Show message for non-editable items
-              if (isReported && !canEdit && item['status'] != 'resolved')
-                Padding(
-                  padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[100],
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.info_outline, size: 14, color: Colors.grey[600]),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Cannot edit - ${item['status']}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                      ],
-                    ),
                   ),
                 ),
             ],
           ),
         );
       },
-    );
-  }
-
-  void _showFullScreenImage(String imagePath) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => Scaffold(
-          backgroundColor: Colors.black,
-          appBar: AppBar(
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-            leading: IconButton(
-              icon: const Icon(Icons.close, color: Colors.white),
-              onPressed: () => Navigator.pop(context),
-            ),
-          ),
-          body: Center(
-            child: InteractiveViewer(
-              minScale: 0.5,
-              maxScale: 4.0,
-              child: Image.network(
-                _getImageUrl(imagePath),
-                fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) {
-                  return Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.error, color: Colors.white, size: 50),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Failed to load image',
-                        style: TextStyle(color: Colors.grey[400]),
-                      ),
-                    ],
-                  );
-                },
-              ),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
