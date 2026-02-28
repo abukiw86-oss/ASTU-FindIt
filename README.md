@@ -26,8 +26,6 @@ This app enables students to quickly locate lost belongings using an intuitive U
 🔍 **Search & Listing** – Find items by category or keywords  
 📦 **Claims Management** – Claim, view, and track your lost items
 
-*(Add more features here once implemented — like image upload, push notifications, filters, etc.)*
-
 ---
 
 ## 📦 Tech Stack
