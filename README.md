@@ -37,15 +37,9 @@ This app enables students to quickly locate lost belongings using an intuitive U
 | **Flutter** | User Interface & multi-platform support |
 | **Dart** | Programming language |
 | **REST API** | Backend communication |
-| **Provider / Bloc / GetX** | (State management — update based on your app) |
-
 ---
 
-## 📸 Screenshots
 
-*Add UI screenshots here to show the app screens (login, search, item details).*
-
----
 
 ## 🎯 Getting Started
 
