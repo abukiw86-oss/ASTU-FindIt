@@ -20,8 +20,7 @@ class LostFoundAppBar extends StatelessWidget implements PreferredSizeWidget {
         future: AuthService.getUserName(),
         builder: (context, snapshot) {
           // No need for !mounted check in StatelessWidget + FutureBuilder
-          final name = snapshot.data ?? 'User';
-
+          final name = snapshot.data ?? '';
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,

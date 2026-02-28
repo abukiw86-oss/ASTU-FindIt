@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
 import 'add_lost_found.dart';
 import '../services/auth_service.dart';
+import 'search.dart';
 import '../widget/appbar.dart';
 import 'notification.dart';
 import 'profile.dart';
@@ -188,6 +189,7 @@ Widget build(BuildContext context) {
         tabController: _tabController,
         onRefresh: _loadItems,
         showTabs: true,
+        
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -226,6 +228,14 @@ Widget build(BuildContext context) {
               MaterialPageRoute(builder: (_) => const  NotificationsScreen()),
             );
          },
+      ),
+      IconButton(onPressed: (){
+        Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const  SearchFilterPage()),
+            );
+            },
+             icon:const Icon(Icons.search),
       ),
       Column(
         mainAxisSize: MainAxisSize.min,
@@ -331,7 +341,6 @@ Widget _buildLostItemCard(dynamic item) {
   var rawImagePath = item['image_path']?.toString()?.trim();
 
   if (rawImagePath != null && rawImagePath != 'NULL' && rawImagePath.isNotEmpty) {
-    // Remove wrapping single quotes if present (from DB)
     if (rawImagePath.startsWith("'") && rawImagePath.endsWith("'")) {
       rawImagePath = rawImagePath.substring(1, rawImagePath.length - 1).trim();
     }
@@ -1135,7 +1144,6 @@ Widget _buildFoundItemCard(dynamic item) {
                       ),
                     ),
                   
-                  // Action button for non-founders
                   if (!isClaimed && !hasApproved && !isFounder)
                     Align(
                       alignment: Alignment.centerRight,
@@ -1146,7 +1154,7 @@ Widget _buildFoundItemCard(dynamic item) {
                                 color: Colors.blue.withOpacity(0.1),
                                 borderRadius: BorderRadius.circular(12),
                               ),
-                              child: Row(
+                              child:const Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   const Icon(Icons.access_time, size: 12, color: Colors.blue),
@@ -1311,7 +1319,6 @@ void _showRequestAccessDialog(dynamic item) {
 
                     const SizedBox(height: 20),
 
-                    // Description / proof
                     Text(
                       'Describe unique features or proof of ownership',
                       style: TextStyle(
@@ -1348,7 +1355,6 @@ void _showRequestAccessDialog(dynamic item) {
 
                     const SizedBox(height: 24),
 
-                    // Images – optional but recommended
                     Text(
                       'Add photos (optional but strongly recommended)',
                       style: TextStyle(
@@ -1487,13 +1493,11 @@ Future<void> _submitAccessRequest(Map<String, dynamic> claimData) async {
 
     var request = http.MultipartRequest('POST', uri);
 
-    // Text fields
     request.fields['item_id']         = claimData['item_id'].toString();
     request.fields['user_string_id']  = await AuthService.getUserStringId() ?? '';
     request.fields['description']     = claimData['description'];
     request.fields['lost_location']   = claimData['lost_location'];
 
-    // Images (if any)
     for (String path in claimData['image_paths']) {
       var file = await http.MultipartFile.fromPath('images[]', path);
       request.files.add(file);
@@ -1564,7 +1568,6 @@ void _showFoundItemDetails(dynamic item) {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Drag handle
               Center(
                 child: Container(
                   width: 40,
@@ -1770,7 +1773,6 @@ void _showFoundItemDetails(dynamic item) {
 
               const SizedBox(height: 8),
 
-              // Title
               Text(
                 item['title'] ?? 'No title',
                 style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
@@ -1820,7 +1822,6 @@ void _showFoundItemDetails(dynamic item) {
                               ),
                               const SizedBox(height: 12),
                               
-                              // Reporter contact info
                               Container(
                                 padding: const EdgeInsets.all(12),
                                 decoration: BoxDecoration(
@@ -1853,7 +1854,6 @@ void _showFoundItemDetails(dynamic item) {
                               
                               const SizedBox(height: 12),
                               
-                              // Action buttons
                               Row(
                                 children: [
                                   Expanded(
