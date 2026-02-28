@@ -10,7 +10,7 @@ class ApiService {
   static const String baseUrl = "https://astufindit.x10.mx/index/api.php"; 
 
 static Future<Map<String, dynamic>> register({
-  required String email,
+  required String student_id,
   required String password,
   required String fullName,
   String? phone,
@@ -20,7 +20,7 @@ static Future<Map<String, dynamic>> register({
       Uri.parse('$baseUrl?action=register'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
-        'email': email,
+        'student_id': student_id,
         'password': password,
         'full_name': fullName,
         'phone': phone ?? '',
@@ -30,23 +30,22 @@ static Future<Map<String, dynamic>> register({
     final data = jsonDecode(response.body);
 
     if (response.statusCode == 201) {
-      // IMPORTANT: Save the user data including user_string_id
       if (data['user'] != null) {
         await AuthService.saveUser(
           userStringId: data['user']['user_string_id'],
-          email: data['user']['email'],
+          student_id: data['user']['student_id'],
           fullName: data['user']['full_name'],
           phone: data['user']['phone'],
           role: data['user']['role'],
         );
       }
-      
       return {
         'success': true, 
         'message': data['message'] ?? 'Registered',
         'user': data['user']
       };
     } else {
+      print(response.statusCode);
       return {
         'success': false,
         'message': data['error'] ?? 'Registration failed',
@@ -57,8 +56,10 @@ static Future<Map<String, dynamic>> register({
     return {'success': false, 'message': 'Network error: $e'};
   }
 }
+
+
 static Future<Map<String, dynamic>> login({
-  required String email,
+  required String student_id,
   required String password,
 }) async {
   try {
@@ -66,24 +67,21 @@ static Future<Map<String, dynamic>> login({
       Uri.parse('$baseUrl?action=login'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
-        'email': email,
+        'student_id': student_id,
         'password': password,
       }),
     );
-
     final data = jsonDecode(response.body);
-
     if (response.statusCode == 200 && data['message'] == 'Logged in successfully') {
       if (data['user'] != null) {
         await AuthService.saveUser(
           userStringId: data['user']['user_string_id'], 
-          email: data['user']['email'],
+          student_id: data['user']['student_id'],
           fullName: data['user']['full_name'],
           phone: data['user']['phone'],
           role: data['user']['role'],
         );
       }
-      
       return {
         'success': true,
         'user': data['user'],
@@ -97,33 +95,11 @@ static Future<Map<String, dynamic>> login({
       };
     }
   } catch (e) {
+    print(e);
     return {'success': false, 'message': 'Network error: $e'};
   }
 }
-  static Future<Map<String, dynamic>> getItems({required String type}) async {
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl?action=list-items&type=$type'),
-        headers: {'Content-Type': 'application/json'},
-      );
 
-      final data = jsonDecode(response.body);
-
-      if (response.statusCode == 200 && data['items'] != null) {
-        return {
-          'success': true,
-          'items': data['items'] as List<dynamic>,
-        };
-      } else {
-        return {
-          'success': false,
-          'message': data['error'] ?? 'Failed to load items',
-        };
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Network error: $e'};
-    }
-  }
 // works
 static Future<Map<String, dynamic>> reportlostItem({
   required String type,
@@ -134,17 +110,13 @@ static Future<Map<String, dynamic>> reportlostItem({
   List<File>? imageFiles,
   required String reporterName,
   required String reporterPhone,
-  String? userStringId,
+  required String userStringId,
 }) async {
   try {
-    print("Starting lost/found item report request");
-
     String finalType = type.trim().toLowerCase();
     if (finalType.isEmpty || (finalType != 'lost' && finalType != 'found')) {
       finalType = 'lost';
     }
-
-    // Basic client-side validations
     if (title.trim().isEmpty) {
       return {'success': false, 'message': 'Title is required'};
     }
@@ -157,8 +129,6 @@ static Future<Map<String, dynamic>> reportlostItem({
     if (reporterPhone.trim().isEmpty) {
       return {'success': false, 'message': 'Reporter phone is required'};
     }
-
-    // For found items → require at least one image
     if (finalType == 'found' && (imageFiles == null || imageFiles.isEmpty)) {
       return {'success': false, 'message': 'At least one image is required for found items'};
     }
@@ -183,46 +153,39 @@ static Future<Map<String, dynamic>> reportlostItem({
 
     if (userStringId != null && userStringId.isNotEmpty) {
       request.fields['user_string_id'] = userStringId;
+    }else{
+      return {
+        'success': false,
+        'message': 'please sign in/ register',
+      };
     }
 
-    // ── Add multiple images ───────────────────────────────────────────────
     if (imageFiles != null && imageFiles.isNotEmpty) {
       for (var file in imageFiles) {
         if (!await file.exists()) {
-          print('File does not exist: ${file.path}');
           continue;
         }
 
         final fileSize = await file.length();
         if (fileSize > 5 * 1024 * 1024) {
-          print('Skipping large file: ${file.path} (${(fileSize / 1024 / 1024).toStringAsFixed(1)} MB)');
           continue;
         }
 
         var multipartFile = http.MultipartFile(
-          'image[]',  // ← IMPORTANT: use 'image' (no [])
+          'image[]',
           http.ByteStream(file.openRead()),
           fileSize,
           filename: path.basename(file.path),
         );
 
-        request.files.add(multipartFile);
-        print('Attached image: ${path.basename(file.path)} (${(fileSize / 1024).toStringAsFixed(0)} KB)');
-      }
+        request.files.add(multipartFile);}
     }
-
-    print("Sending request with ${request.files.length} image(s)");
-
     var streamedResponse = await request.send().timeout(
       const Duration(seconds: 60),
       onTimeout: () => throw Exception('Upload timeout - check connection'),
     );
 
     var response = await http.Response.fromStream(streamedResponse);
-
-    print('Response status: ${response.statusCode}');
-    print('Response body (first 500 chars): ${response.body.substring(0, response.body.length.clamp(0, 5000))}');
-
     if (response.body.trim().isEmpty) {
       return {'success': false, 'message': 'Empty response from server'};
     }
@@ -258,43 +221,111 @@ static Future<Map<String, dynamic>> reportlostItem({
         'message': data['message'] ?? 'Server error (${response.statusCode})',
       };
     }
-  } catch (e, stack) {
-    print('Error in reportlostItem: $e');
-    print('Stack trace: $stack');
+  } catch (e) {
     return {
       'success': false,
       'message': 'Request failed: ${e.toString()}',
     };
   }
 }
+
 // works
-static Future<Map<String, dynamic>> getLostItems() async {
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl?action=get-lost-items'),
-      );
-      
-      if (response.body.isEmpty) {
-        return {'success': false, 'message': 'Empty response'};
-      }
-      
-      final data = jsonDecode(response.body);
-      
-      if (data['success'] == true) {
-        return {
-          'success': true,
-          'items': data['items'] ?? [],
-        };
-      } else {
-        return {
-          'success': false,
-          'message': data['message'] ?? 'Failed to load lost items',
-        };
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Network error: $e'};
+static Future<Map<String, dynamic>> getLostItems({String? userStringId}) async {
+  try {
+    String url = '$baseUrl?action=get-lost-items';
+    
+    // Add user_string_id if provided
+    if (userStringId != null && userStringId.isNotEmpty) {
+      url += '&user_string_id=$userStringId';
     }
-  }
+
+    final response = await http.get(
+      Uri.parse(url),
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      
+    ).timeout(
+      const Duration(seconds: 15),
+      onTimeout: () => throw Exception('Connection timeout'),
+    );
+    if (response.body.isEmpty) {
+      return {'success': false, 'message': 'Empty response from server'};
+    }
+    
+    // Handle non-200 status codes
+    if (response.statusCode != 200) {
+      return {
+        'success': false, 
+        'message': 'Server error: ${response.statusCode}'
+      };
+    }
+    
+    final Map<String, dynamic> data = jsonDecode(response.body);
+    
+    // Process the items to ensure consistent format
+    if (data['success'] == true) {
+      List<dynamic> items = data['items'] ?? [];
+      
+      // Process each item for Flutter-friendly format
+      List<Map<String, dynamic>> processedItems = [];
+      
+      for (var item in items) {
+        Map<String, dynamic> processedItem = Map<String, dynamic>.from(item);
+        
+        // Handle image paths
+        if (processedItem.containsKey('image_path') && 
+            processedItem['image_path'] != null && 
+            processedItem['image_path'] != 'NULL') {
+          
+          // Convert pipe-separated string to list
+          String imagePath = processedItem['image_path'].toString();
+          if (imagePath.contains('|')) {
+            processedItem['image_list'] = imagePath.split('|')
+                .where((url) => url.trim().isNotEmpty)
+                .toList();
+          } else if (imagePath.isNotEmpty) {
+            processedItem['image_list'] = [imagePath];
+          } else {
+            processedItem['image_list'] = [];
+          }
+        } else {
+          processedItem['image_list'] = [];
+        }
+        
+        // Ensure boolean fields
+        processedItem['is_my_item'] = processedItem['is_my_item'] == true || 
+                                       processedItem['is_my_item'] == '1';
+        
+        processedItems.add(processedItem);
+      }
+      
+      // Return comprehensive response with all data from server
+      return {
+        'success': true,
+        'items': processedItems,
+        'user_items': data['user_items'] ?? [],
+        'other_items': data['other_items'] ?? [],
+        'user_info': data['user_info'] ?? {},
+        'totals': data['totals'] ?? {},
+        'has_admin_approval': data['user_info']?['has_admin_approval'] ?? false,
+        'admin_approval_count': data['user_info']?['admin_approval_count'] ?? 0,
+        'message': data['message'] ?? 'Items loaded successfully',
+      };
+    } else {
+      return {
+        'success': false,
+        'message': data['message'] ?? 'Failed to load lost items',
+      };
+    }
+  } on SocketException catch (e) {
+    return {
+      'success': false, 
+      'message': 'Network error: Please check your internet connection'
+    };
+  } 
+}
 
 static Future<Map<String, dynamic>> requestItem({
     required String userStringId, 
@@ -325,6 +356,7 @@ static Future<Map<String, dynamic>> getFoundItems({String? userStringId}) async 
         Uri.parse('$baseUrl?action=get-found-items${userStringId != null ? '&user_string_id=$userStringId' : ''}'),
       );
       return jsonDecode(response.body);
+      
     } catch (e) {
       return {'success': false, 'message': 'Network error: $e'};
     }
@@ -341,15 +373,15 @@ static Future<Map<String, dynamic>> getUserRequests({required String userStringI
     }
   }
 
-  /// Update an existing item (only possible when status is 'pending')
-  static Future<Map<String, dynamic>> updateItem({
+
+static Future<Map<String, dynamic>> updateItem({
     required int itemId,
     required String title,
     required String description,
     String? location,
     required String category,
     File? imageFile,
-    required String userStringId, // Changed from userId
+    required String userStringId, 
   }) async {
     try {
       var request = http.MultipartRequest(
@@ -359,7 +391,7 @@ static Future<Map<String, dynamic>> getUserRequests({required String userStringI
 
       // Add text fields
       request.fields['item_id'] = itemId.toString();
-      request.fields['user_string_id'] = userStringId; // Use string ID
+      request.fields['user_string_id'] = userStringId; 
       request.fields['title'] = title;
       request.fields['description'] = description;
       request.fields['location'] = location ?? '';
@@ -439,7 +471,8 @@ static Future<Map<String, dynamic>> getUserRequests({required String userStringI
     }
   }
 
-  static Future<Map<String, dynamic>> deleteItem({
+
+static Future<Map<String, dynamic>> deleteItem({
     required int itemId,
     required String userStringId, 
   }) async {
@@ -481,142 +514,30 @@ static Future<Map<String, dynamic>> getUserRequests({required String userStringI
     }
   }
 
-  // Profile-related methods using string ID
-  static Future<Map<String, dynamic>> getUserProfile({required String userStringId}) async {
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl?action=get-profile&user_string_id=$userStringId'),
-      );
-      return jsonDecode(response.body);
-    } catch (e) {
-      return {'success': false, 'message': 'Network error: $e'};
-    }
-  }
 
-  static Future<Map<String, dynamic>> updateUserProfile({
-    required String userStringId,
-    String? fullName,
-    String? phone,
-  }) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl?action=update-profile'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'user_string_id': userStringId,
-          'full_name': fullName,
-          'phone': phone,
-        }),
-      );
-      return jsonDecode(response.body);
-    } catch (e) {
-      return {'success': false, 'message': 'Network error: $e'};
-    }
-  }
-
-  static Future<Map<String, dynamic>> changePassword({
-    required String userStringId,
-    required String currentPassword,
-    required String newPassword,
-  }) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl?action=change-password'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'user_string_id': userStringId,
-          'current_password': currentPassword,
-          'new_password': newPassword,
-        }),
-      );
-      return jsonDecode(response.body);
-    } catch (e) {
-      return {'success': false, 'message': 'Network error: $e'};
-    }
-  }
-
-  static Future<Map<String, dynamic>> getUserHistory({required String userStringId}) async {
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl?action=get-user-history&user_string_id=$userStringId'),
-      );
-      return jsonDecode(response.body);
-    } catch (e) {
-      return {'success': false, 'message': 'Network error: $e'};
-    }
-  }
-
-  // Notification methods using string ID
-  static Future<Map<String, dynamic>> getNotifications({required String userStringId}) async {
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl?action=get-notifications&user_string_id=$userStringId'),
-      );
-      return jsonDecode(response.body);
-    } catch (e) {
-      return {'success': false, 'message': 'Network error: $e'};
-    }
-  }
-
-  static Future<Map<String, dynamic>> markNotificationAsRead({
-    required int notificationId,
-    required String userStringId,
-  }) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl?action=mark-notification-read'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'notification_id': notificationId,
-          'user_string_id': userStringId,
-        }),
-      );
-      return jsonDecode(response.body);
-    } catch (e) {
-      return {'success': false, 'message': 'Network error: $e'};
-    }
-  }
-
-  static Future<Map<String, dynamic>> markAllNotificationsAsRead({required String userStringId}) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl?action=mark-all-notifications-read'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'user_string_id': userStringId}),
-      );
-      return jsonDecode(response.body);
-    } catch (e) {
-      return {'success': false, 'message': 'Network error: $e'};
-    }
-  }
-  // Add these helper methods to convert between ID types if needed
-static String? getItemStringId(dynamic item) {
-  if (item == null) return null;
-  if (item is Map && item.containsKey('item_string_id')) {
-    return item['item_string_id'] as String?;
-  }
-  return null;
-}
-
-// Update requestItemAccess to accept itemStringId
 static Future<Map<String, dynamic>> requestItemAccess({
   required String userStringId,
-  required dynamic itemId, // Can be int or String
+  required dynamic itemId, 
   required String message,
 }) async {
   try {
-    Map<String, dynamic> body = {
-      'user_string_id': userStringId,
-      'message': message,
-    };
-    
-    // Handle both numeric and string IDs
-    if (itemId is String) {
-      body['item_string_id'] = itemId;
-    } else {
-      body['item_id'] = itemId;
+    if (userStringId.isEmpty) {
+      return {'success': false, 'message': 'User ID is required'};
     }
     
+    if (itemId == null || itemId.toString().isEmpty) {
+      return {'success': false, 'message': 'Item ID is required'};
+    }
+    
+    if (message.length < 20) {
+      return {'success': false, 'message': 'Message must be at least 20 characters'};
+    }
+
+    Map<String, dynamic> body = {
+      'user_string_id': userStringId,
+      'item_string_id': itemId.toString(), 
+      'message': message.trim(),
+    };
     final response = await http.post(
       Uri.parse('$baseUrl?action=request-item-access'),
       headers: {
@@ -628,18 +549,9 @@ static Future<Map<String, dynamic>> requestItemAccess({
       const Duration(seconds: 30),
       onTimeout: () => throw Exception('Connection timeout'),
     );
-    
-    if (response.body.trim().isEmpty) {
+    if (response.body.isEmpty) {
       return {'success': false, 'message': 'Empty response from server'};
     }
-    
-    if (response.body.trim().startsWith('<')) {
-      return {
-        'success': false, 
-        'message': 'Server error. Please check server logs.'
-      };
-    }
-    
     final Map<String, dynamic> data = jsonDecode(response.body);
     return data;
     
@@ -651,56 +563,27 @@ static Future<Map<String, dynamic>> requestItemAccess({
   }
 }
 
-static Future<Map<String, dynamic>> getItemByStringId(String itemStringId) async {
-  try {
-    final response = await http.get(
-      Uri.parse('$baseUrl?action=get-item&item_string_id=$itemStringId'),
-    ).timeout(
-      const Duration(seconds: 30),
-      onTimeout: () => throw Exception('Connection timeout'),
-    );
-
-    if (response.body.isEmpty) {
-      return {'success': false, 'message': 'Empty response'};
-    }
-
-    final data = jsonDecode(response.body);
-    
-    if (data['success'] == true) {
-      return {
-        'success': true,
-        'item': data['item'],
-      };
-    } else {
-      return {
-        'success': false,
-        'message': data['message'] ?? 'Item not found',
-      };
-    }
-  } catch (e) {
-    return {'success': false, 'message': 'Network error: $e'};
-  }
-}
-
 static Future<Map<String, dynamic>> reportFoundMatch({
-  required String lostItemStringId,
+  required String lostItemStringId, 
   required String finderName,
   required String finderPhone,
   required String finderMessage,
- required String userStringId,
- required List<File>? imageFiles,         
+  required String userStringId,
+  required List<File>? imageFiles,  
+  required String properties,
+  required String location ,
+  required String foundDate,
+  required String title      
 }) async {
   try {
-    print('📤 Reporting found match for lost item: $lostItemStringId');
-    print(userStringId);
-    print('   Images to upload: ${imageFiles?.length ?? 0}');
-
     var request = http.MultipartRequest(
       'POST',
       Uri.parse('$baseUrl?action=report-found-match'),
     );
-
-    // ── Text fields ────────────────────────────────────────
+    request.fields['title'] = title;
+    request.fields['location']         = location;
+    request.fields['date_and_time']        = foundDate;
+    request.fields['property']      = properties;
     request.fields['lost_item_string_id'] = lostItemStringId;
     request.fields['finder_name']         = finderName;
     request.fields['finder_phone']        = finderPhone;
@@ -716,8 +599,7 @@ static Future<Map<String, dynamic>> reportFoundMatch({
           final filename = file.path.split(Platform.pathSeparator).last;
 
           if (length > 8 * 1024 * 1024) { 
-            print('⚠️ Skipping large file: $filename (${(length / 1024 / 1024).toStringAsFixed(1)} MB)');
-            continue;
+             continue;
           }
 
           var stream = http.ByteStream(file.openRead());
@@ -730,23 +612,17 @@ static Future<Map<String, dynamic>> reportFoundMatch({
           );
 
           request.files.add(multipartFile);
-          print('📸 Added image ${i + 1}/${imageFiles.length}: $filename (${(length / 1024).toStringAsFixed(0)} KB)');
-        } else {
-          print('⚠️ File not found: ${file.path}');
         }
       }
     }
 
     // ── Send request ───────────────────────────────────────
     var streamedResponse = await request.send().timeout(
-      const Duration(seconds: 45),   // ← increased a bit because multiple images take longer
+      const Duration(seconds: 45), 
       onTimeout: () => throw Exception('Upload timeout'),
     );
 
     var response = await http.Response.fromStream(streamedResponse);
-
-    print('📥 Response status: ${response.statusCode}');
-    print('📥 Response body: ${response.body.substring(0, response.body.length.clamp(0, 5000))}...');
 
     if (response.body.trim().isEmpty) {
       return {'success': false, 'message': 'Empty response from server'};
@@ -763,14 +639,13 @@ static Future<Map<String, dynamic>> reportFoundMatch({
     }
 
   } catch (e, stack) {
-    print('❌ Error in reportFoundMatch: $e');
-    print('Stack trace: $stack');
     return {
       'success': false,
       'message': 'Network/upload error: ${e.toString()}',
     };
   }
 }
+
 
 static Future<Map<String, dynamic>> getItemDetails({required String itemStringId}) async {
   try {

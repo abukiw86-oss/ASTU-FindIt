@@ -129,9 +129,6 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     }
   }
 
-  // ────────────────────────────────────────────────
-  // Profile update
-  // ────────────────────────────────────────────────
 
   Future<void> _updateProfile() async {
     if (_user == null) return;
@@ -156,7 +153,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
 
         await AuthService.saveUser(
           userStringId: _user!['user_string_id'],
-          email: _user!['email'],
+          student_id: _user!['student_id'],
           fullName: _nameController.text.trim(),
           phone: _phoneController.text.trim(),
           role: _user!['role'],
@@ -639,10 +636,10 @@ Widget _buildProfileTab() {
               child: Column(
                 children: [
                   TextFormField(
-                    initialValue: _user!['email'],
+                    initialValue: _user!['student_id'],
                     readOnly: true,
                     decoration: InputDecoration(
-                      labelText: 'Email',
+                      labelText: 'student id',
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                       prefixIcon: const Icon(Icons.email),
                     ),

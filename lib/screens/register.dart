@@ -12,7 +12,7 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
+  final _studentidController = TextEditingController();
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
@@ -30,7 +30,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     try {
       final registerResult = await ApiService.register(
-        email: _emailController.text.trim(),
+        student_id: _studentidController.text.trim(),
         password: _passwordController.text,
         fullName: _nameController.text.trim(),
         phone: _phoneController.text.trim(),
@@ -41,7 +41,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       }
 
       final loginResult = await ApiService.login(
-        email: _emailController.text.trim(),
+        student_id: _studentidController.text.trim(),
         password: _passwordController.text,
       );
 
@@ -52,7 +52,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       await AuthService.saveUser(
         userStringId: user['user_string_id'],
-        email: user['email'] as String,
+        student_id: user['student_id'] as String,
         fullName: user['full_name'] as String,
         phone: user['phone'] as String?,
         role: user['role'] as String,
@@ -105,15 +105,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 const SizedBox(height: 20),
 
                 TextFormField(
-                  controller: _emailController,
+                  controller: _studentidController,
                   decoration: const InputDecoration(
-                    labelText: 'Email *',
+                    labelText: 'Student id *',
                     border: OutlineInputBorder(),
                   ),
                   keyboardType: TextInputType.emailAddress,
                   validator: (v) {
                     if (v!.trim().isEmpty) return 'Required';
-                    if (!v.contains('@') || !v.contains('.')) return 'Invalid email';
                     return null;
                   },
                 ),
@@ -190,7 +189,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   @override
   void dispose() {
-    _emailController.dispose();
+    _studentidController.dispose();
     _passwordController.dispose();
     _nameController.dispose();
     _phoneController.dispose();

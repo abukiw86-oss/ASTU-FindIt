@@ -13,7 +13,7 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
+  final _studentidController = TextEditingController();
   final _passwordController = TextEditingController();
 
   bool _isLoading = false;
@@ -31,7 +31,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       final result = await ApiService.login(
-        email: _emailController.text.trim(),
+        student_id: _studentidController.text.trim(),
         password: _passwordController.text,
       );
       if (result['success'] == true) {
@@ -46,7 +46,7 @@ class _LoginScreenState extends State<LoginScreen> {
         }
 
         await AuthService.saveUser(
-          email: user['email'] as String,
+          student_id: user['email'] as String,
           userStringId: user['user_string_id'],
           fullName: user['full_name'] as String,
           phone: user['phone'] as String?,
@@ -101,9 +101,9 @@ class _LoginScreenState extends State<LoginScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 TextFormField(
-                  controller: _emailController,
+                  controller: _studentidController,
                   decoration: InputDecoration(
-                    labelText: 'Email',
+                    labelText: 'Student Id',
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                     prefixIcon: const Icon(Icons.email_outlined),
                     filled: true,
@@ -112,9 +112,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   keyboardType: TextInputType.emailAddress,
                   textInputAction: TextInputAction.next,
                   validator: (v) {
-                    if (v == null || v.trim().isEmpty) return 'Email is required';
-                    if (!v.contains('@') || !v.contains('.')) return 'Invalid email format';
-                    return null;
+                    if (v == null || v.trim().isEmpty) return 'Student id is required';
                   },
                 ),
                 const SizedBox(height: 20),
@@ -210,7 +208,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
-    _emailController.dispose();
+    _studentidController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
